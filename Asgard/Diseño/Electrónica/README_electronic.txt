@@ -1,1 +1,0 @@
-Aquí se encontrarán todos los recursos referentes a diseño electrónico y prototipado electrónico
