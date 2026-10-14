@@ -1,0 +1,1 @@
+Aquí se encontrarán todos los recursos referentes a diseño estructural y estético del dispotivo
