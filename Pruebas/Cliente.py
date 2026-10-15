@@ -8,11 +8,11 @@ import threading
 from fractions import Fraction
 from tkinter import messagebox, ttk
 import tkinter as tk
+from typing import Any
 
 import av
 import cv2
 import numpy as np
-import sounddevice as sd
 import websockets
 from aiortc import (
     AudioStreamTrack,
@@ -27,6 +27,14 @@ from PIL import Image, ImageTk
 
 PUERTO = 8765
 FRECUENCIA_AUDIO = 48_000
+
+
+def obtener_modulo_audio() -> Any:
+    try:
+        import sounddevice
+    except (ImportError, OSError) as error:
+        raise RuntimeError(f"Audio no disponible: {error}") from error
+    return sounddevice
 
 
 def cargar_servidores_ice() -> list[RTCIceServer]:
@@ -56,6 +64,68 @@ def guardar_ultimo(destino: queue.Queue, valor: object) -> None:
         except queue.Empty:
             pass
         destino.put_nowait(valor)
+
+
+class PruebaAudio:
+    def __init__(self, dispositivo_entrada: int, dispositivo_salida: int):
+        audio = obtener_modulo_audio()
+        self.fotogramas: queue.Queue[np.ndarray] = queue.Queue(maxsize=12)
+        self.buffer_salida = np.empty((0, 1), dtype=np.float32)
+        self.entrada = audio.InputStream(
+            device=dispositivo_entrada,
+            samplerate=FRECUENCIA_AUDIO,
+            channels=1,
+            dtype="float32",
+            callback=self._capturar,
+        )
+        self.salida = audio.OutputStream(
+            device=dispositivo_salida,
+            samplerate=FRECUENCIA_AUDIO,
+            channels=1,
+            dtype="float32",
+            callback=self._reproducir,
+        )
+
+    def iniciar(self) -> None:
+        self.salida.start()
+        try:
+            self.entrada.start()
+        except Exception:
+            self.salida.close()
+            self.entrada.close()
+            raise
+
+    def _capturar(self, datos: np.ndarray, cantidad: int, tiempo: object, estado: object) -> None:
+        del cantidad, tiempo, estado
+        try:
+            self.fotogramas.put_nowait(datos.copy())
+        except queue.Full:
+            try:
+                self.fotogramas.get_nowait()
+            except queue.Empty:
+                pass
+            self.fotogramas.put_nowait(datos.copy())
+
+    def _reproducir(self, salida: np.ndarray, cantidad: int, tiempo: object, estado: object) -> None:
+        del tiempo, estado
+        salida.fill(0)
+        posicion = 0
+        while posicion < cantidad:
+            if not len(self.buffer_salida):
+                try:
+                    self.buffer_salida = self.fotogramas.get_nowait()
+                except queue.Empty:
+                    return
+            muestras = min(cantidad - posicion, len(self.buffer_salida))
+            salida[posicion : posicion + muestras] = self.buffer_salida[:muestras]
+            self.buffer_salida = self.buffer_salida[muestras:]
+            posicion += muestras
+
+    def detener(self) -> None:
+        for stream in (self.entrada, self.salida):
+            if stream.active:
+                stream.stop()
+            stream.close()
 
 
 class CamaraTrack(VideoStreamTrack):
@@ -89,13 +159,14 @@ class CamaraTrack(VideoStreamTrack):
 
 
 class MicrofonoTrack(AudioStreamTrack):
-    def __init__(self, loop: asyncio.AbstractEventLoop):
+    def __init__(self, loop: asyncio.AbstractEventLoop, dispositivo: int):
         super().__init__()
         self.loop = loop
         self.fotogramas: asyncio.Queue[av.AudioFrame] = asyncio.Queue(maxsize=10)
         self.siguiente_pts = 0
         try:
-            self.microfono = sd.InputStream(
+            self.microfono = obtener_modulo_audio().InputStream(
+                device=dispositivo,
                 samplerate=FRECUENCIA_AUDIO,
                 channels=1,
                 dtype="float32",
@@ -160,11 +231,24 @@ class ClienteReunion:
         self.nombre_var = tk.StringVar(value="Participante")
         self.servidor_var = tk.StringVar(value="127.0.0.1")
         self.estado_var = tk.StringVar(value="Desconectado")
+        self.estado_audio_var = tk.StringVar(value="")
+        self.entrada_audio_var = tk.StringVar()
+        self.salida_audio_var = tk.StringVar()
+        self.dispositivos_entrada: dict[str, int] = {}
+        self.dispositivos_salida: dict[str, int] = {}
+        self.dispositivo_entrada: int | None = None
+        self.dispositivo_salida: int | None = None
+        self.prueba_audio: PruebaAudio | None = None
         self.boton_conexion: ttk.Button
+        self.boton_prueba_audio: ttk.Button
+        self.selector_entrada: ttk.Combobox
+        self.selector_salida: ttk.Combobox
+        self.boton_actualizar_audio: ttk.Button
         self.foto_local = None
         self.foto_remota = None
 
         self._crear_interfaz()
+        self._actualizar_dispositivos_audio()
         self.ventana.after(40, self._actualizar_interfaz)
 
     def _crear_interfaz(self) -> None:
@@ -187,6 +271,37 @@ class ClienteReunion:
         ttk.Label(controles, textvariable=self.estado_var).grid(
             row=1, column=0, columnspan=5, sticky="w", pady=(8, 0)
         )
+        ttk.Label(controles, text="Micrófono:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.selector_entrada = ttk.Combobox(
+            controles,
+            textvariable=self.entrada_audio_var,
+            state="readonly",
+            width=34,
+        )
+        self.selector_entrada.grid(row=2, column=1, padx=(5, 12), sticky="ew", pady=(8, 0))
+        ttk.Label(controles, text="Salida:").grid(row=2, column=2, sticky="w", pady=(8, 0))
+        self.selector_salida = ttk.Combobox(
+            controles,
+            textvariable=self.salida_audio_var,
+            state="readonly",
+            width=34,
+        )
+        self.selector_salida.grid(row=2, column=3, padx=(5, 12), sticky="ew", pady=(8, 0))
+        self.boton_actualizar_audio = ttk.Button(
+            controles,
+            text="Actualizar dispositivos",
+            command=self._actualizar_dispositivos_audio,
+        )
+        self.boton_actualizar_audio.grid(row=2, column=4, pady=(8, 0))
+        self.boton_prueba_audio = ttk.Button(
+            controles,
+            text="Probar comunicación",
+            command=self._alternar_prueba_audio,
+        )
+        self.boton_prueba_audio.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(controles, textvariable=self.estado_audio_var).grid(
+            row=3, column=2, columnspan=3, sticky="w", pady=(6, 0)
+        )
 
         videos = ttk.Frame(self.ventana, padding=(10, 0, 10, 10))
         videos.pack(fill="both", expand=True)
@@ -202,6 +317,79 @@ class ClienteReunion:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
+    def _actualizar_dispositivos_audio(self) -> None:
+        try:
+            audio = obtener_modulo_audio()
+            dispositivos = audio.query_devices()
+            predeterminados = audio.default.device
+            self.dispositivos_entrada = {}
+            self.dispositivos_salida = {}
+            for indice, dispositivo in enumerate(dispositivos):
+                etiqueta = f"{indice}: {dispositivo['name']}"
+                if dispositivo["max_input_channels"] > 0:
+                    self.dispositivos_entrada[etiqueta] = indice
+                if dispositivo["max_output_channels"] > 0:
+                    self.dispositivos_salida[etiqueta] = indice
+
+            entradas = list(self.dispositivos_entrada)
+            salidas = list(self.dispositivos_salida)
+            self.selector_entrada.configure(values=entradas or ["Sin entradas disponibles"])
+            self.selector_salida.configure(values=salidas or ["Sin salidas disponibles"])
+            self.entrada_audio_var.set(self._etiqueta_dispositivo(entradas, predeterminados[0]))
+            self.salida_audio_var.set(self._etiqueta_dispositivo(salidas, predeterminados[1]))
+            if entradas and salidas:
+                self.estado_audio_var.set("Selecciona los dispositivos y prueba el audio antes de llamar.")
+            else:
+                self.estado_audio_var.set("No se encontraron dispositivos de entrada y salida.")
+        except Exception as error:
+            self.dispositivos_entrada = {}
+            self.dispositivos_salida = {}
+            self.selector_entrada.configure(values=["Audio no disponible"])
+            self.selector_salida.configure(values=["Audio no disponible"])
+            self.entrada_audio_var.set("Audio no disponible")
+            self.salida_audio_var.set("Audio no disponible")
+            self.estado_audio_var.set(str(error))
+
+    def _etiqueta_dispositivo(self, etiquetas: list[str], indice: int) -> str:
+        for etiqueta in etiquetas:
+            if self.dispositivos_entrada.get(etiqueta) == indice:
+                return etiqueta
+            if self.dispositivos_salida.get(etiqueta) == indice:
+                return etiqueta
+        return etiquetas[0] if etiquetas else ""
+
+    def _alternar_prueba_audio(self) -> None:
+        if self.prueba_audio is not None:
+            self._detener_prueba_audio()
+            self.estado_audio_var.set("Prueba de audio detenida.")
+            return
+
+        entrada = self.dispositivos_entrada.get(self.entrada_audio_var.get())
+        salida = self.dispositivos_salida.get(self.salida_audio_var.get())
+        if entrada is None or salida is None:
+            self.estado_audio_var.set("Selecciona una entrada y una salida disponibles.")
+            return
+        try:
+            prueba = PruebaAudio(entrada, salida)
+            prueba.iniciar()
+        except Exception as error:
+            self.estado_audio_var.set(f"No se pudo iniciar la prueba: {error}")
+            return
+        self.prueba_audio = prueba
+        self.boton_prueba_audio.configure(text="Detener prueba")
+        self.estado_audio_var.set("Prueba activa: habla para comprobar el micrófono y la salida.")
+
+    def _detener_prueba_audio(self) -> None:
+        if self.prueba_audio is None:
+            return
+        prueba = self.prueba_audio
+        self.prueba_audio = None
+        try:
+            prueba.detener()
+        except Exception as error:
+            self.estado_audio_var.set(f"Prueba detenida con aviso: {error}")
+        self.boton_prueba_audio.configure(text="Probar comunicación")
+
     def _alternar_conexion(self) -> None:
         if self.tarea_conexion is not None:
             self.loop.call_soon_threadsafe(self._programar_desconexion)
@@ -212,6 +400,12 @@ class ClienteReunion:
         if not servidor:
             messagebox.showerror("Servidor requerido", "Escribe la dirección IP o nombre del servidor.")
             return
+        self.dispositivo_entrada = self.dispositivos_entrada.get(self.entrada_audio_var.get())
+        self.dispositivo_salida = self.dispositivos_salida.get(self.salida_audio_var.get())
+        if self.dispositivo_entrada is None or self.dispositivo_salida is None:
+            messagebox.showerror("Audio no disponible", "Selecciona un micrófono y una salida de audio.")
+            return
+        self._detener_prueba_audio()
         self._estado("Conectando al servidor...", True)
         self.loop.call_soon_threadsafe(self._programar_conexion, servidor, nombre[:30])
 
@@ -281,7 +475,9 @@ class ClienteReunion:
             return
         camara = CamaraTrack(0, self.vista_local)
         try:
-            microfono = MicrofonoTrack(asyncio.get_running_loop())
+            if self.dispositivo_entrada is None:
+                raise RuntimeError("Selecciona un micrófono antes de iniciar la llamada.")
+            microfono = MicrofonoTrack(asyncio.get_running_loop(), self.dispositivo_entrada)
         except Exception:
             camara.stop()
             raise
@@ -339,7 +535,10 @@ class ClienteReunion:
     async def _reproducir_audio_remoto(self, pista) -> None:
         salida = None
         try:
-            salida = sd.OutputStream(
+            if self.dispositivo_salida is None:
+                raise RuntimeError("Selecciona una salida de audio antes de iniciar la llamada.")
+            salida = obtener_modulo_audio().OutputStream(
+                device=self.dispositivo_salida,
                 samplerate=FRECUENCIA_AUDIO,
                 channels=1,
                 dtype="float32",
@@ -438,6 +637,7 @@ class ClienteReunion:
 
     def cerrar_ventana(self) -> None:
         self.saliendo = True
+        self._detener_prueba_audio()
         self.loop.call_soon_threadsafe(self._programar_cierre)
 
     def _programar_cierre(self) -> None:

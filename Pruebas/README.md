@@ -2,14 +2,19 @@
 
 Este prototipo conecta dos clientes Python en una reunión 1:1. Bifröst coordina la
 señalización; audio y video se envían directamente entre los participantes con
-WebRTC. La cámara predeterminada (índice 0), el micrófono y la salida de audio
-predeterminados del sistema son los dispositivos utilizados.
+WebRTC. Se puede seleccionar el micrófono y la salida de audio desde el cliente;
+la cámara predeterminada del sistema (índice 0) es la utilizada.
 
 ## Requisitos
 
 - Python 3.10 o posterior.
 - Cámara, micrófono y altavoces o audífonos.
 - Ambos equipos en la misma red local para la primera prueba.
+- En Linux, instala PortAudio para habilitar los dispositivos de audio:
+
+  ```bash
+  sudo apt install libportaudio2
+  ```
 
 ## Inicio
 
@@ -38,6 +43,10 @@ En el campo **Servidor**, introduce `127.0.0.1` si el servidor y ese cliente
 están en el mismo equipo, o la dirección IP local del equipo servidor si están
 en equipos distintos. Pulsa **Conectar** en ambos clientes. El servidor rechaza
 un tercer participante.
+
+Antes de conectar, elige el micrófono y la salida de audio. Pulsa **Probar
+comunicación** y habla para monitorizar el micrófono por la salida seleccionada;
+usa audífonos para evitar acoples y pulsa **Detener prueba** antes de conectar.
 
 ## Conexiones por Internet
 
