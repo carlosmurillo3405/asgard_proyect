@@ -1,132 +1,111 @@
-# Prueba de chat tcp con cliente y servidor intermediario entre 2 clientes (servidor)
-import socket
-import threading
+"""Servidor de señalización para una reunión de dos clientes."""
+
+import asyncio
+import json
+import uuid
+from contextlib import suppress
+
+from websockets.asyncio.server import ServerConnection, serve
+from websockets.exceptions import ConnectionClosed
 
 HOST = "0.0.0.0"
-PUERTO = 5050
+PUERTO = 8765
+MAX_CLIENTES = 2
+MAX_MENSAJE = 1_000_000
 
-clientes = {}
-candado = threading.Lock()
-
-
-def enviar_a_todos(mensaje, excepto=None):
-    datos = (mensaje + "\n").encode("utf-8")
-
-    with candado:
-        conexiones = list(clientes.keys())
-
-    for conexion in conexiones:
-        if conexion is excepto:
-            continue
-
-        try:
-            conexion.sendall(datos)
-        except OSError:
-            desconectar(conexion)
+clientes: dict[str, tuple[ServerConnection, str]] = {}
 
 
-def desconectar(conexion):
-    with candado:
-        nombre = clientes.pop(conexion, None)
+async def enviar(conexion: ServerConnection, mensaje: dict[str, object]) -> None:
+    await conexion.send(json.dumps(mensaje, ensure_ascii=False))
 
+
+async def atender_cliente(conexion: ServerConnection) -> None:
+    cliente_id = uuid.uuid4().hex
+    nombre = "Invitado"
+
+    if len(clientes) >= MAX_CLIENTES:
+        await enviar(conexion, {"type": "error", "message": "La reunión ya tiene dos participantes."})
+        await conexion.close(code=4001, reason="Reunión completa")
+        return
+
+    clientes[cliente_id] = (conexion, nombre)
+    print(f"Cliente conectado: {conexion.remote_address}")
     try:
-        conexion.close()
-    except OSError:
-        pass
+        await enviar(conexion, {"type": "waiting", "count": len(clientes)})
 
-    if nombre:
-        print(f"{nombre} se desconectó.")
-        enviar_a_todos(f"*** {nombre} salió del chat ***")
+        if len(clientes) == MAX_CLIENTES:
+            participantes = list(clientes.items())
+            await asyncio.gather(
+                *(
+                    enviar(
+                        participante[1][0],
+                        {
+                            "type": "ready",
+                            "initiator": indice == 0,
+                            "peer_name": participantes[1 - indice][1][1],
+                        },
+                    )
+                    for indice, participante in enumerate(participantes)
+                )
+            )
 
-
-def atender_cliente(conexion, direccion):
-    archivo = conexion.makefile("r", encoding="utf-8")
-
-    try:
-        # La primera línea enviada por el cliente es su nombre
-        nombre = archivo.readline().strip()
-
-        if not nombre:
-            return
-
-        nombre = nombre[:30]
-
-        with candado:
-            clientes[conexion] = nombre
-
-        print(f"{nombre} se conectó desde {direccion[0]}:{direccion[1]}")
-        enviar_a_todos(f"*** {nombre} entró al chat ***", excepto=conexion)
-
-        conexion.sendall(
-            "*** Conectado al servidor. Escribe /salir para terminar. ***\n"
-            .encode("utf-8")
-        )
-
-        for linea in archivo:
-            mensaje = linea.rstrip("\n")
-
-            if mensaje == "/salir":
-                break
-
-            if not mensaje:
+        async for contenido in conexion:
+            try:
+                mensaje = json.loads(contenido)
+            except (json.JSONDecodeError, TypeError):
+                await enviar(conexion, {"type": "error", "message": "Mensaje JSON inválido."})
+                continue
+            if not isinstance(mensaje, dict):
+                await enviar(conexion, {"type": "error", "message": "El mensaje debe ser un objeto JSON."})
                 continue
 
-            mensaje = mensaje[:1000]
-            texto = f"{nombre}: {mensaje}"
+            tipo = mensaje.get("type")
+            if tipo == "join":
+                nombre_recibido = mensaje.get("name")
+                if isinstance(nombre_recibido, str) and nombre_recibido.strip():
+                    nombre = nombre_recibido.strip()[:30]
+                    clientes[cliente_id] = (conexion, nombre)
+            elif tipo in {"offer", "answer"}:
+                sdp = mensaje.get("sdp")
+                if not isinstance(sdp, str) or len(sdp) > MAX_MENSAJE:
+                    await enviar(conexion, {"type": "error", "message": "Descripción de llamada inválida."})
+                    continue
 
-            print(texto)
-            enviar_a_todos(texto, excepto=conexion)
-
-    except (ConnectionError, OSError, UnicodeError):
+                otro_cliente = next(
+                    (otro for otro_id, (otro, _) in clientes.items() if otro_id != cliente_id),
+                    None,
+                )
+                if otro_cliente is not None:
+                    await enviar(otro_cliente, {"type": tipo, "sdp": sdp})
+            else:
+                await enviar(conexion, {"type": "error", "message": "Tipo de mensaje no admitido."})
+    except ConnectionClosed:
         pass
     finally:
-        try:
-            archivo.close()
-        except OSError:
-            pass
+        clientes.pop(cliente_id, None)
+        print(f"Cliente desconectado: {nombre}")
+        for otro, _ in list(clientes.values()):
+            with suppress(ConnectionClosed):
+                await enviar(otro, {"type": "peer_left", "name": nombre})
 
-        desconectar(conexion)
 
-
-def iniciar_servidor():
-    servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    # Permite reiniciar el servidor sin esperar a que se libere el puerto
-    servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    servidor.bind((HOST, PUERTO))
-    servidor.listen()
-
-    print("Servidor iniciado.")
-    print(f"Escuchando en todas las interfaces, puerto TCP {PUERTO}")
-    print("Presiona Ctrl+C para detenerlo.")
-
-    try:
-        while True:
-            conexion, direccion = servidor.accept()
-
-            hilo = threading.Thread(
-                target=atender_cliente,
-                args=(conexion, direccion),
-                daemon=True
-            )
-            hilo.start()
-
-    except KeyboardInterrupt:
-        print("\nApagando servidor...")
-
-    finally:
-        with candado:
-            conexiones = list(clientes.keys())
-
-        for conexion in conexiones:
-            try:
-                conexion.close()
-            except OSError:
-                pass
-
-        servidor.close()
+async def iniciar_servidor() -> None:
+    async with serve(
+        atender_cliente,
+        HOST,
+        PUERTO,
+        max_size=MAX_MENSAJE,
+        ping_interval=20,
+        ping_timeout=20,
+    ):
+        print(f"Servidor de reuniones escuchando en {HOST}:{PUERTO}")
+        print(f"Admite hasta {MAX_CLIENTES} clientes. Ctrl+C para detener.")
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
-    iniciar_servidor()
+    try:
+        asyncio.run(iniciar_servidor())
+    except KeyboardInterrupt:
+        print("\nServidor detenido.")
