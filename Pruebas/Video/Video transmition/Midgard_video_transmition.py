@@ -1,4 +1,9 @@
-"""Aplicación multiplataforma para transmitir video mediante un servidor relay."""
+"""Cliente multiplataforma y servidor relay para transmitir video en tiempo real.
+
+La resolución, los cuadros por segundo y la compresión JPEG configurables se
+aplican únicamente al video que envía este cliente. El video recibido se decodifica
+sin limitar su resolución; solo la vista previa se ajusta al tamaño de su panel.
+"""
 
 from __future__ import annotations
 
@@ -22,15 +27,33 @@ from tkinter import messagebox, ttk
 
 
 DEFAULT_PORT = 8765
+# El tamaño máximo permite cuadros JPEG de alta resolución, además de metadatos.
 MAX_PACKET_SIZE = 8 * 1024 * 1024
 MAX_METADATA_SIZE = 64 * 1024
 MAX_ROOM_MEMBERS = 8
-MAX_FRAME_WIDTH = 960
-FRAME_RATE = 20
-JPEG_QUALITY = 72
 
+# Las cabeceras usan enteros de 4 bytes en orden de red para delimitar paquetes.
 _PACKET_LENGTH = struct.Struct("!I")
 _METADATA_LENGTH = struct.Struct("!I")
+
+
+@dataclass(frozen=True)
+class TransmissionProfile:
+    """Parámetros máximos aplicados al video de salida del cliente."""
+
+    max_width: int
+    max_height: int
+    frames_per_second: int
+    jpeg_quality: int
+
+
+# Cada perfil limita resolución, frecuencia y compresión JPEG del video saliente;
+# un cuadro de origen más pequeño nunca se amplía.
+TRANSMISSION_PROFILES: dict[str, TransmissionProfile] = {
+    "Mala": TransmissionProfile(640, 360, 12, 45),
+    "Media": TransmissionProfile(1280, 720, 20, 70),
+    "Buena": TransmissionProfile(1920, 1080, 30, 90),
+}
 
 
 class ProtocolError(Exception):
@@ -38,6 +61,8 @@ class ProtocolError(Exception):
 
 
 def _receive_exact(connection: socket.socket, size: int) -> bytes:
+    """Lee exactamente el número de bytes solicitado o reporta el cierre remoto."""
+    # TCP es un flujo: una llamada a recv puede devolver menos bytes que los pedidos.
     chunks = bytearray()
     while len(chunks) < size:
         chunk = connection.recv(size - len(chunks))
@@ -54,6 +79,8 @@ def _send_packet(
     data: bytes = b"",
     send_lock: threading.Lock | None = None,
 ) -> None:
+    """Serializa y envía un paquete completo, opcionalmente sin intercalar escrituras."""
+    # Metadatos acotados previenen cabeceras desproporcionadas.
     if len(packet_type) != 1 or not packet_type.isascii():
         raise ValueError("El tipo de paquete debe ser un carácter ASCII.")
     encoded_metadata = json.dumps(metadata or {}, ensure_ascii=False).encode("utf-8")
@@ -70,6 +97,7 @@ def _send_packet(
         raise ValueError("El paquete excede el tamaño máximo permitido.")
     packet = _PACKET_LENGTH.pack(len(body)) + body
 
+    # Un lock protege el límite entre paquetes cuando varios hilos usan el socket.
     if send_lock is None:
         connection.sendall(packet)
     else:
@@ -78,6 +106,8 @@ def _send_packet(
 
 
 def _receive_packet(connection: socket.socket) -> tuple[str, dict[str, Any], bytes]:
+    """Recibe y valida la cabecera, los metadatos JSON y los bytes del paquete."""
+    # Validar la longitud antes de reservar memoria limita el tamaño de entrada.
     (body_size,) = _PACKET_LENGTH.unpack(_receive_exact(connection, _PACKET_LENGTH.size))
     if body_size < 1 + _METADATA_LENGTH.size or body_size > MAX_PACKET_SIZE:
         raise ProtocolError("Tamaño de paquete inválido.")
@@ -99,6 +129,7 @@ def _receive_packet(connection: socket.socket) -> tuple[str, dict[str, Any], byt
 
 
 def _validated_text(value: Any, label: str, max_length: int) -> str:
+    """Valida el nombre o la sala recibidos antes de registrarlos."""
     if not isinstance(value, str):
         raise ProtocolError(f"{label} debe ser texto.")
     result = value.strip()
@@ -109,6 +140,8 @@ def _validated_text(value: Any, label: str, max_length: int) -> str:
 
 @dataclass
 class _Peer:
+    """Representa una conexión del cliente a una sala del servidor."""
+
     connection: socket.socket
     room: str
     name: str
@@ -118,9 +151,11 @@ class _Peer:
     def send(
         self, packet_type: str, metadata: dict[str, Any], data: bytes = b""
     ) -> None:
+        """Envía un paquete al cliente usando el lock exclusivo de su conexión."""
         _send_packet(self.connection, packet_type, metadata, data, self.send_lock)
 
     def close(self) -> None:
+        """Cierra la conexión, tolerando que el cliente ya la haya cerrado."""
         try:
             self.connection.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -129,16 +164,20 @@ class _Peer:
 
 
 class _RelayServer(socketserver.ThreadingTCPServer):
+    """Agrupa clientes por sala y retransmite sus cuadros sin almacenarlos."""
+
     allow_reuse_address = True
     daemon_threads = True
     block_on_close = False
 
     def __init__(self, address: tuple[str, int]) -> None:
+        """Inicializa la tabla de salas antes de aceptar conexiones."""
         self.rooms: dict[str, dict[str, _Peer]] = {}
         self.rooms_lock = threading.Lock()
         super().__init__(address, _RelayHandler)
 
     def register(self, peer: _Peer) -> None:
+        """Agrega al participante e informa a los miembros existentes de la sala."""
         with self.rooms_lock:
             members = self.rooms.setdefault(peer.room, {})
             if len(members) >= MAX_ROOM_MEMBERS:
@@ -179,6 +218,7 @@ class _RelayServer(socketserver.ThreadingTCPServer):
                     member.close()
 
     def unregister(self, peer: _Peer) -> None:
+        """Retira al participante e informa a los demás que salió de la sala."""
         with self.rooms_lock:
             members = self.rooms.get(peer.room)
             if members is None or members.pop(peer.peer_id, None) is None:
@@ -195,6 +235,7 @@ class _RelayServer(socketserver.ThreadingTCPServer):
                 member.close()
 
     def relay_frame(self, sender: _Peer, frame: bytes) -> None:
+        """Envía el cuadro recibido a cada miembro de la sala excepto al emisor."""
         with self.rooms_lock:
             members = list(self.rooms.get(sender.room, {}).values())
 
@@ -209,9 +250,12 @@ class _RelayServer(socketserver.ThreadingTCPServer):
 
 
 class _RelayHandler(socketserver.BaseRequestHandler):
+    """Valida el saludo del cliente y procesa sus cuadros de video."""
+
     server: _RelayServer
 
     def handle(self) -> None:
+        """Registra la conexión, retransmite video y limpia la sala al terminar."""
         peer: _Peer | None = None
         try:
             self.request.settimeout(15)
@@ -242,6 +286,7 @@ class _RelayHandler(socketserver.BaseRequestHandler):
 
 
 def run_relay_server(host: str, port: int) -> None:
+    """Ejecuta el servidor relay hasta una interrupción o señal de cierre."""
     server = _RelayServer((host, port))
     actual_host, actual_port = server.server_address
     print(f"Servidor relay escuchando en {actual_host}:{actual_port}")
@@ -264,6 +309,7 @@ def run_relay_server(host: str, port: int) -> None:
 
 
 def _camera_backend() -> int:
+    """Devuelve el backend de captura de OpenCV apropiado para el sistema."""
     if platform.system() == "Windows":
         return cv2.CAP_DSHOW
     if platform.system() == "Linux":
@@ -272,6 +318,7 @@ def _camera_backend() -> int:
 
 
 def _scan_cameras() -> list[tuple[int, str]]:
+    """Detecta cámaras disponibles y devuelve sus índices y nombres visibles."""
     cameras: list[tuple[int, str]] = []
     for index in range(10):
         camera = cv2.VideoCapture(index, _camera_backend())
@@ -285,16 +332,38 @@ def _scan_cameras() -> list[tuple[int, str]]:
     return cameras
 
 
-def _prepare_frame(frame: np.ndarray) -> np.ndarray:
+def _prepare_frame(
+    frame: np.ndarray, profile: TransmissionProfile
+) -> np.ndarray:
+    """Reduce el cuadro saliente al perfil seleccionado sin ampliar cuadros pequeños."""
+    # Se usa el menor factor para respetar ambos límites y mantener la proporción.
     height, width = frame.shape[:2]
-    if width > MAX_FRAME_WIDTH:
-        new_height = round(height * MAX_FRAME_WIDTH / width)
-        return cv2.resize(frame, (MAX_FRAME_WIDTH, new_height), interpolation=cv2.INTER_AREA)
+    scale = min(profile.max_width / width, profile.max_height / height, 1.0)
+    if scale < 1:
+        new_width = max(1, round(width * scale))
+        new_height = max(1, round(height * scale))
+        return cv2.resize(
+            frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+        )
+    return frame
+
+
+def _decode_received_frame(encoded_frame: bytes) -> np.ndarray:
+    """Decodifica un cuadro sin aplicar escalado ni compresión adicionales."""
+    # La interfaz adapta la imagen al panel más adelante, no en la recepción.
+    frame = cv2.imdecode(
+        np.frombuffer(encoded_frame, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    if frame is None:
+        raise ProtocolError("No se pudo decodificar un cuadro recibido.")
     return frame
 
 
 class VideoClientApp:
+    """Construye la interfaz de cliente y coordina cámara, red y vista previa."""
+
     def __init__(self, root: tk.Tk) -> None:
+        """Inicializa el estado de los hilos y programa las tareas de la interfaz."""
         self.root = root
         self.root.title("Midgard — Transmisión de video")
         self.root.minsize(720, 560)
@@ -316,6 +385,8 @@ class VideoClientApp:
         self.room_value = tk.StringVar(value="sala-general")
         self.name_value = tk.StringVar(value=socket.gethostname()[:32])
         self.camera_value = tk.StringVar(value="Sin cámara")
+        # La elección se aplica al iniciar cada conexión y afecta solo al envío.
+        self.quality_value = tk.StringVar(value="Media")
         self.status_value = tk.StringVar(value="Buscando cámaras...")
 
         self._build_interface()
@@ -326,6 +397,7 @@ class VideoClientApp:
         threading.Thread(target=self._refresh_cameras, daemon=True).start()
 
     def _build_interface(self) -> None:
+        """Crea los controles de conexión, calidad de envío y mosaicos de video."""
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("TFrame", background="#18212b")
@@ -362,6 +434,19 @@ class VideoClientApp:
             width=15,
         )
         self.camera_picker.grid(row=1, column=4, sticky="ew", padx=(0, 8))
+
+        # Los perfiles explícitos permiten ajustar el ancho de banda antes de conectar.
+        ttk.Label(connection, text="Calidad de envío").grid(
+            row=2, column=0, sticky="w", padx=(0, 6)
+        )
+        self.quality_picker = ttk.Combobox(
+            connection,
+            textvariable=self.quality_value,
+            state="readonly",
+            values=tuple(TRANSMISSION_PROFILES),
+        )
+        self.quality_picker.grid(row=2, column=1, columnspan=3, sticky="ew", padx=(0, 8))
+
         self.connect_button = ttk.Button(
             connection, text="Conectar", command=self.connect
         )
@@ -371,15 +456,17 @@ class VideoClientApp:
         )
         self.refresh_button.grid(row=2, column=4, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Label(connection, textvariable=self.status_value).grid(
-            row=2, column=0, columnspan=4, sticky="w", pady=(8, 0)
+            row=3, column=0, columnspan=6, sticky="w", pady=(8, 0)
         )
 
+        # El área crece con la ventana y distribuye participantes en dos columnas.
         self.video_area = tk.Frame(self.root, bg="#18212b", padx=8, pady=4)
         self.video_area.pack(fill=tk.BOTH, expand=True)
         self.video_area.columnconfigure(0, weight=1)
         self.video_area.columnconfigure(1, weight=1)
 
     def _add_video_tile(self, peer_id: str, title: str) -> None:
+        """Crea o actualiza el panel de un participante en la cuadrícula."""
         if peer_id in self.tiles:
             self.tiles[peer_id][0].winfo_children()[0].configure(text=title)
             return
@@ -410,6 +497,7 @@ class VideoClientApp:
         self.video_area.rowconfigure(index // 2, weight=1)
 
     def _remove_video_tile(self, peer_id: str) -> None:
+        """Libera el panel y los cuadros asociados con un participante que salió."""
         tile_data = self.tiles.pop(peer_id, None)
         self.frames.pop(peer_id, None)
         self.photo_images.pop(peer_id, None)
@@ -420,6 +508,7 @@ class VideoClientApp:
         self._reflow_tiles()
 
     def _reflow_tiles(self) -> None:
+        """Reorganiza los paneles restantes y elimina filas vacías de la cuadrícula."""
         for index, (tile, _, _) in enumerate(self.tiles.values()):
             tile.grid_configure(row=index // 2, column=index % 2)
         row_count = (len(self.tiles) + 1) // 2
@@ -429,11 +518,13 @@ class VideoClientApp:
             self.video_area.rowconfigure(row, weight=1)
 
     def _start_camera_scan(self) -> None:
+        """Inicia el descubrimiento de cámaras sin bloquear la interfaz."""
         self.refresh_button.configure(state=tk.DISABLED)
         self.status_value.set("Buscando cámaras disponibles...")
         threading.Thread(target=self._refresh_cameras, daemon=True).start()
 
     def _refresh_cameras(self) -> None:
+        """Busca dispositivos y comunica a la interfaz el resultado de la búsqueda."""
         try:
             cameras = _scan_cameras()
             self.events.put(("cameras", cameras))
@@ -441,6 +532,7 @@ class VideoClientApp:
             self.events.put(("camera_error", str(error)))
 
     def connect(self) -> None:
+        """Valida los datos, selecciona el perfil de envío y crea el hilo cliente."""
         if self.stop_event is not None:
             self.disconnect()
             return
@@ -462,18 +554,21 @@ class VideoClientApp:
 
         selected_camera = self.camera_value.get()
         camera_index = self.camera_names.get(selected_camera)
+        profile = TRANSMISSION_PROFILES[self.quality_value.get()]
         stop_event = threading.Event()
         self.stop_event = stop_event
         self.connect_button.configure(text="Desconectar")
+        self.quality_picker.configure(state=tk.DISABLED)
         self.status_value.set(f"Conectando a {host}:{port}...")
         self._clear_remote_tiles()
         threading.Thread(
             target=self._run_client,
-            args=(host, port, room, name, camera_index, stop_event),
+            args=(host, port, room, name, camera_index, profile, stop_event),
             daemon=True,
         ).start()
 
     def disconnect(self) -> None:
+        """Detiene el bucle de envío y despierta el hilo mediante el cierre del socket."""
         stop_event = self.stop_event
         if stop_event is None:
             return
@@ -494,8 +589,10 @@ class VideoClientApp:
         room: str,
         name: str,
         camera_index: int | None,
+        profile: TransmissionProfile,
         stop_event: threading.Event,
     ) -> None:
+        """Mantiene la conexión, envía video según el perfil y libera los recursos."""
         connection: socket.socket | None = None
         camera: cv2.VideoCapture | None = None
         receiver: threading.Thread | None = None
@@ -538,8 +635,15 @@ class VideoClientApp:
                     self.events.put(
                         ("status", f"Conectado; no se pudo abrir la cámara {camera_index}.")
                     )
+                else:
+                    # Estos valores son una preferencia: algunos controladores pueden
+                    # conservar un modo distinto si la cámara no soporta el solicitado.
+                    camera.set(cv2.CAP_PROP_FRAME_WIDTH, profile.max_width)
+                    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, profile.max_height)
+                    camera.set(cv2.CAP_PROP_FPS, profile.frames_per_second)
 
-            frame_delay = 1 / FRAME_RATE
+            # El límite de cuadros por segundo se aplica a la transmisión saliente.
+            frame_delay = 1 / profile.frames_per_second
             while not stop_event.is_set():
                 if camera is None:
                     stop_event.wait(0.1)
@@ -551,11 +655,12 @@ class VideoClientApp:
                     stop_event.wait(0.2)
                     continue
 
-                frame = _prepare_frame(frame)
+                # La vista local usa el mismo cuadro ya adaptado al perfil de envío.
+                frame = _prepare_frame(frame, profile)
                 with self.frame_lock:
                     self.pending_frames["local"] = frame
                 encoded, jpeg = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, profile.jpeg_quality]
                 )
                 if not encoded:
                     raise RuntimeError("No se pudo codificar el cuadro de video.")
@@ -596,6 +701,10 @@ class VideoClientApp:
     def _receive_video(
         self, connection: socket.socket, stop_event: threading.Event
     ) -> None:
+        """Decodifica cada cuadro recibido a su resolución completa, sin recomprimirlo."""
+        # Notificar una sola vez por participante evita llenar la cola con nombres
+        # cuando llegan cuadros a una frecuencia mayor que la de la interfaz.
+        announced_peers: set[str] = set()
         try:
             while not stop_event.is_set():
                 packet_type, metadata, data = _receive_packet(connection)
@@ -606,14 +715,14 @@ class VideoClientApp:
                         raise ProtocolError(
                             "El cuadro recibido no identifica al participante."
                         )
-                    decoded = cv2.imdecode(
-                        np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR
-                    )
-                    if decoded is None:
-                        raise ProtocolError("No se pudo decodificar un cuadro recibido.")
+                    decoded = _decode_received_frame(data)
+                    # Se conserva el cuadro decodificado completo; no se aplica el
+                    # perfil local de envío ni se reduce su resolución al recibir.
                     with self.frame_lock:
                         self.pending_frames[peer_id] = decoded
-                    self.events.put(("peer_name", (peer_id, name)))
+                    if peer_id not in announced_peers:
+                        announced_peers.add(peer_id)
+                        self.events.put(("peer_name", (peer_id, name)))
                 elif packet_type == "E":
                     self.events.put(("peer_event", metadata))
                 else:
@@ -624,6 +733,7 @@ class VideoClientApp:
                 stop_event.set()
 
     def _process_events(self) -> None:
+        """Aplica en el hilo de Tk los cambios enviados por los hilos de trabajo."""
         try:
             while True:
                 event, payload = self.events.get_nowait()
@@ -657,6 +767,7 @@ class VideoClientApp:
                     self.stop_event = None
                     self.active_socket = None
                     self.connect_button.configure(text="Conectar", state=tk.NORMAL)
+                    self.quality_picker.configure(state="readonly")
                     if not self.status_value.get().startswith("Error:"):
                         self.status_value.set("Desconectado.")
         except queue.Empty:
@@ -664,6 +775,7 @@ class VideoClientApp:
         self.root.after(40, self._process_events)
 
     def _update_camera_list(self, cameras: list[tuple[int, str]]) -> None:
+        """Actualiza el selector de cámaras sin cambiar la selección válida actual."""
         previous = self.camera_value.get()
         self.camera_names = {label: index for index, label in cameras}
         values = ["Sin cámara", *self.camera_names]
@@ -675,6 +787,7 @@ class VideoClientApp:
         self.refresh_button.configure(state=tk.NORMAL)
 
     def _clear_remote_tiles(self) -> None:
+        """Retira cuadros y paneles de la sesión anterior antes de reconectar."""
         for peer_id in list(self.tiles):
             if peer_id != "local":
                 self._remove_video_tile(peer_id)
@@ -683,6 +796,7 @@ class VideoClientApp:
             self.pending_frames.clear()
 
     def _render_frames(self) -> None:
+        """Escala las vistas previas al panel; mantiene intactos los cuadros recibidos."""
         with self.frame_lock:
             self.frames.update(self.pending_frames)
             self.pending_frames.clear()
@@ -691,6 +805,8 @@ class VideoClientApp:
             if tile_data is None:
                 continue
             video_label = tile_data[2]
+            # El reescalado es solo de presentación; el cuadro original permanece en
+            # memoria para conservar la mayor resolución recibida disponible.
             target_width = max(video_label.winfo_width(), 160)
             target_height = max(video_label.winfo_height(), 120)
             height, width = frame.shape[:2]
@@ -707,6 +823,7 @@ class VideoClientApp:
         self.root.after(100, self._render_frames)
 
     def close(self) -> None:
+        """Señala el cierre a los hilos y destruye la ventana principal."""
         if self.stop_event is not None:
             self.stop_event.set()
         if self.active_socket is not None:
@@ -719,6 +836,7 @@ class VideoClientApp:
 
 
 def main() -> None:
+    """Interpreta opciones de línea de comandos e inicia servidor o cliente."""
     parser = argparse.ArgumentParser(
         description="Transmisión de video por medio de un servidor relay."
     )
