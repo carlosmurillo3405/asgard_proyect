@@ -11,7 +11,7 @@ PEER_TIMEOUT = 15.0                 # segundos sin recibir nada -> se elimina el
 
 def main():
     ap = argparse.ArgumentParser(description="Servidor relay de audio (UDP)")
-    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--host", default="192.168.100.23")
     ap.add_argument("--port", type=int, default=5004)
     args = ap.parse_args()
 

@@ -266,7 +266,7 @@ class AudioCall:
 def main():
     ap = argparse.ArgumentParser(description="Llamada de audio en tiempo real")
     ap.add_argument("--list-devices", action="store_true", help="listar dispositivos y salir")
-    ap.add_argument("--server", default="127.0.0.1:5004", help="host:puerto del servidor")
+    ap.add_argument("--server", default="192.168.100.23:5004", help="host:puerto del servidor")
     ap.add_argument("--room", default="sala1", help="nombre de la sala (igual en ambos equipos)")
     ap.add_argument("--mode", choices=["mono", "stereo"], default="stereo")
     ap.add_argument("--rate", type=int, default=48000, help="frecuencia de muestreo (igual en ambos)")
