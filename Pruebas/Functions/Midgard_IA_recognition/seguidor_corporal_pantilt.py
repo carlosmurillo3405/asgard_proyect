@@ -1,26 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SEGUIDOR DE PERSONA CON CÁMARA PAN/TILT
-=======================================
-Para Raspberry Pi OS / Debian.
+"""Seguidor corporal Pan/Tilt con MediaPipe Pose Landmarker.
 
-- Detecta personas con la cámara (MobileNet-SSD si tienes los archivos del
-  modelo; si no, usa el detector HOG que ya viene con OpenCV).
-- Mueve DOS servos que SOLO ROTAN la cámara (pan = izquierda/derecha,
-  tilt = arriba/abajo) para mantener a la persona en el centro del encuadre.
-- Interfaz gráfica sencilla con dos modos:
-    * SEGUIR  : la cámara sigue a la persona.
-    * FIJO    : la cámara se queda en un punto (ajustable con sliders).
-
-Ejemplos de uso:
-    python3 seguidor_pantilt.py --backend sim                  # prueba sin servos
-    python3 seguidor_pantilt.py --camera 1                      # usar la cámara USB índice 1
-    python3 seguidor_pantilt.py --backend gpiozero --pan-pin 17 --tilt-pin 27
-    python3 seguidor_pantilt.py --backend pca9685 --picamera2  # PCA9685 + cámara CSI
+Ejemplos:
+    python3 seguidor_corporal_pantilt.py --backend sim
+    python3 seguidor_corporal_pantilt.py --camera 1 --model pose_landmarker_heavy.task
+    python3 seguidor_corporal_pantilt.py --backend gpiozero --pan-pin 17 --tilt-pin 27
+    python3 seguidor_corporal_pantilt.py --backend pca9685 --picamera2
 """
 
 import argparse
+from dataclasses import dataclass
 import math
 import os
 import sys
@@ -38,19 +28,38 @@ from PIL import Image, ImageTk
 # CONSTANTES AJUSTABLES
 # ----------------------------------------------------------------------------
 DISPLAY_W = 640            # ancho del video en la ventana
+DISPLAY_H = 480
 MIN_PULSE_US = 500         # pulso mínimo del servo (0°)   -> ajusta según tu servo
 MAX_PULSE_US = 2400        # pulso máximo del servo (180°) -> ajusta según tu servo
 AIM_Y = 0.35               # punto vertical al que apunta (0=cabeza, 0.5=centro del cuerpo)
 LOCK_TIMEOUT = 2.0         # s sin ver al objetivo antes de elegir otra persona
 MAX_JUMP = 0.35            # salto máximo (fracción del ancho) entre detecciones
-HOG_WIDTH = 480            # ancho al que se reduce la imagen para HOG
-HOG_MIN_WEIGHT = 0.5       # confianza mínima HOG (sube si hay falsos positivos)
-SSD_CONF = 0.5             # confianza mínima MobileNet-SSD
 HERE = os.path.dirname(os.path.abspath(__file__))
+POSE_CONNECTIONS = (
+    (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
+    (9, 10), (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
+    (17, 19), (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
+    (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (27, 29), (29, 31),
+    (27, 31), (24, 26), (26, 28), (28, 30), (30, 32), (28, 32),
+)
 
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def confidence_value(value):
+    value = float(value)
+    if not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError("el valor debe estar entre 0 y 1")
+    return value
+
+
+def positive_int(value):
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError("el valor debe ser mayor que cero")
+    return value
 
 
 # ----------------------------------------------------------------------------
@@ -131,76 +140,116 @@ class FrameGrabber(threading.Thread):
 
 
 # ----------------------------------------------------------------------------
-# DETECCIÓN DE PERSONAS
+# DETECCIÓN Y SEGUIMIENTO CORPORAL
 # ----------------------------------------------------------------------------
-class PersonDetector:
-    """Devuelve cajas (x, y, w, h) en coordenadas del frame original."""
+@dataclass(frozen=True)
+class BodyPose:
+    """Persona detectada, con caja y landmarks en píxeles."""
 
-    def __init__(self, mode, proto, weights):
-        self.net = None
-        self.name = "HOG"
-        if mode in ("auto", "ssd"):
-            if os.path.isfile(proto) and os.path.isfile(weights):
-                self.net = cv2.dnn.readNetFromCaffe(proto, weights)
-                self.name = "MobileNet-SSD"
-            elif mode == "ssd":
-                print("[detector] No encontré los archivos del modelo SSD; uso HOG.")
-        if self.net is None:
-            self.hog = cv2.HOGDescriptor()
-            self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-        print(f"[detector] Usando {self.name}")
+    box: tuple[int, int, int, int]
+    landmarks: tuple[tuple[float, float, float], ...]
 
-    def detect(self, frame):
-        return self._detect_ssd(frame) if self.net is not None else self._detect_hog(frame)
 
-    def _detect_ssd(self, frame):
-        h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)),
-                                     0.007843, (300, 300), 127.5)
-        self.net.setInput(blob)
-        det = self.net.forward()
-        out = []
-        for i in range(det.shape[2]):
-            cls = int(det[0, 0, i, 1])
-            conf = float(det[0, 0, i, 2])
-            if cls == 15 and conf >= SSD_CONF:      # 15 = "person"
-                x1, y1, x2, y2 = (det[0, 0, i, 3:7] * np.array([w, h, w, h])).astype(int)
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w - 1, x2), min(h - 1, y2)
-                if x2 > x1 and y2 > y1:
-                    out.append((int(x1), int(y1), int(x2 - x1), int(y2 - y1)))
-        return out
+def poses_from_landmarks(poses, frame_width, frame_height, min_visibility=0.35):
+    """Convierte landmarks normalizados de MediaPipe en coordenadas del frame."""
+    detections = []
+    for pose in poses:
+        points = []
+        visible = []
+        for landmark in pose:
+            x = float(landmark.x) * frame_width
+            y = float(landmark.y) * frame_height
+            visibility = float(getattr(landmark, "visibility", 1.0))
+            points.append((x, y, visibility))
+            if (
+                visibility >= min_visibility
+                and -0.1 <= landmark.x <= 1.1
+                and -0.1 <= landmark.y <= 1.1
+            ):
+                visible.append((x, y))
+        if len(visible) < 4:
+            continue
+        x_values = [point[0] for point in visible]
+        y_values = [point[1] for point in visible]
+        x1 = max(0, min(frame_width - 1, int(min(x_values))))
+        y1 = max(0, min(frame_height - 1, int(min(y_values))))
+        x2 = max(0, min(frame_width, int(math.ceil(max(x_values)))))
+        y2 = max(0, min(frame_height, int(math.ceil(max(y_values)))))
+        if x2 > x1 and y2 > y1:
+            detections.append(
+                BodyPose((x1, y1, x2 - x1, y2 - y1), tuple(points))
+            )
+    return detections
 
-    def _detect_hog(self, frame):
-        h, w = frame.shape[:2]
-        scale = HOG_WIDTH / float(w) if w > HOG_WIDTH else 1.0
-        small = cv2.resize(frame, None, fx=scale, fy=scale) if scale < 1.0 else frame
-        rects, weights = self.hog.detectMultiScale(
-            small, winStride=(8, 8), padding=(8, 8), scale=1.05)
-        if len(rects) == 0:
-            return []
-        boxes, scores = [], []
-        for (x, y, bw, bh), wt in zip(rects, np.ravel(weights)):
-            if wt >= HOG_MIN_WEIGHT:
-                boxes.append([int(x / scale), int(y / scale),
-                              int(bw / scale), int(bh / scale)])
-                scores.append(float(wt))
-        if not boxes:
-            return []
-        keep = cv2.dnn.NMSBoxes(boxes, scores, 0.0, 0.4)
-        keep = np.array(keep).flatten()
-        return [tuple(boxes[i]) for i in keep]
+
+class MediaPipePoseDetector:
+    """MediaPipe Pose Landmarker con seguimiento temporal y varias personas."""
+
+    def __init__(
+        self,
+        model_path,
+        max_poses=3,
+        min_confidence=0.5,
+        min_visibility=0.35,
+    ):
+        try:
+            import mediapipe as mp
+        except ImportError as error:
+            raise RuntimeError(
+                "Falta MediaPipe. Instala las dependencias con: "
+                "python -m pip install -r requirements-seguidor-corporal.txt"
+            ) from error
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(
+                f"No se encontró el modelo MediaPipe: {model_path}. "
+                "Descarga pose_landmarker_heavy.task; consulta el README."
+            )
+
+        options = mp.tasks.vision.PoseLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
+            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+            num_poses=max_poses,
+            min_pose_detection_confidence=min_confidence,
+            min_pose_presence_confidence=min_confidence,
+            min_tracking_confidence=min_confidence,
+            output_segmentation_masks=False,
+        )
+        self._mp = mp
+        self._landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
+        self._last_timestamp_ms = -1
+        self.min_visibility = min_visibility
+        self.name = "MediaPipe Pose Landmarker"
+        print(f"[detector] Usando {self.name} ({os.path.basename(model_path)})")
+
+    def detect(self, frame, timestamp_ms):
+        timestamp_ms = max(int(timestamp_ms), self._last_timestamp_ms + 1)
+        self._last_timestamp_ms = timestamp_ms
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = self._mp.Image(
+            image_format=self._mp.ImageFormat.SRGB,
+            data=np.ascontiguousarray(rgb),
+        )
+        result = self._landmarker.detect_for_video(image, timestamp_ms)
+        return poses_from_landmarks(
+            result.pose_landmarks,
+            frame.shape[1],
+            frame.shape[0],
+            self.min_visibility,
+        )
+
+    def close(self):
+        self._landmarker.close()
 
 
 class DetectionWorker(threading.Thread):
-    """Ejecuta la detección en segundo plano para que la GUI no se congele."""
+    """Ejecuta el seguimiento corporal fuera del hilo de interfaz."""
 
     def __init__(self, detector, grabber):
         super().__init__(daemon=True)
         self.detector = detector
         self.grabber = grabber
         self._lock = threading.Lock()
-        self._result = (0, [], 0, 0)   # (id_resultado, cajas, ancho, alto)
+        self._result = (0, [], 0, 0)   # (id_resultado, poses, ancho, alto)
         self._counter = 0
         self._running = True
 
@@ -213,14 +262,16 @@ class DetectionWorker(threading.Thread):
                 continue
             last_id = fid
             try:
-                boxes = self.detector.detect(frame)
+                timestamp_ms = time.monotonic_ns() // 1_000_000
+                poses = self.detector.detect(frame, timestamp_ms)
             except Exception:
                 traceback.print_exc()
-                boxes = []
+                poses = []
                 time.sleep(0.5)
             with self._lock:
                 self._counter += 1
-                self._result = (self._counter, boxes, frame.shape[1], frame.shape[0])
+                self._result = (self._counter, poses, frame.shape[1], frame.shape[0])
+        self.detector.close()
 
     def latest(self):
         with self._lock:
@@ -392,23 +443,44 @@ class App:
     def __init__(self, root, args):
         self.root = root
         self.running = True
-        root.title("Seguidor de persona Pan/Tilt")
+        root.title("Midgard | Seguimiento corporal Pan/Tilt")
+        root.geometry("1180x760")
+        root.minsize(1000, 680)
+        root.configure(bg="#18212b")
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Escape>", lambda e: self.close())
 
-        # --- hardware y procesos ---
+        self.detector = MediaPipePoseDetector(
+            args.model,
+            max_poses=args.max_poses,
+            min_confidence=args.min_confidence,
+            min_visibility=args.min_visibility,
+        )
         self.backend = self._make_backend(args)
-        self.pt = PanTilt(self.backend, (args.pan_min, args.pan_max),
-                          (args.tilt_min, args.tilt_max))
-        self.camera = Camera(args.camera, args.width, args.height, args.picamera2)
+        try:
+            self.pt = PanTilt(
+                self.backend,
+                (args.pan_min, args.pan_max),
+                (args.tilt_min, args.tilt_max),
+            )
+        except Exception:
+            self.backend.close()
+            self.detector.close()
+            raise
+        try:
+            self.camera = Camera(args.camera, args.width, args.height, args.picamera2)
+        except Exception:
+            self.detector.close()
+            self.pt.close()
+            raise
         self.grabber = FrameGrabber(self.camera)
         self.grabber.start()
-        self.detector = PersonDetector(args.detector, args.proto, args.weights)
         self.worker = DetectionWorker(self.detector, self.grabber)
         self.worker.start()
         self.ctrl = Controller(self.pt, args.hfov)
 
         # --- estado ---
+        self.poses = []
         self.boxes = []
         self.target = None
         self.last_center = None
@@ -418,6 +490,8 @@ class App:
         self.det_hz = 0.0
         self.last_fid = -1
         self.scale = 1.0
+        self.image_offset = (0, 0)
+        self.latest_frame = None
         self.photo = None
 
         self._build_ui()
@@ -438,70 +512,151 @@ class App:
         return SimBackend()
 
     def _build_ui(self):
-        left = ttk.Frame(self.root)
-        left.pack(side="left", padx=8, pady=8)
-        self.canvas = tk.Canvas(left, width=DISPLAY_W, height=int(DISPLAY_W * 0.75),
-                                bg="black", highlightthickness=0)
-        self.canvas.pack()
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TFrame", background="#18212b")
+        style.configure("TLabel", background="#18212b", foreground="#edf2f7")
+        style.configure("TButton", padding=6)
+        style.configure(
+            "Card.TLabelframe", background="#263442", bordercolor="#394b5b"
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background="#263442",
+            foreground="#edf2f7",
+            font=("Segoe UI", 10, "bold"),
+        )
+        style.configure("Hint.TLabel", foreground="#aab7c4", font=("Segoe UI", 9))
+        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"))
+
+        header = ttk.Frame(self.root, padding=(18, 12))
+        header.pack(fill="x")
+        ttk.Label(header, text="MIDGARD", style="Title.TLabel").pack(side="left")
+        ttk.Label(
+            header,
+            text="Seguimiento corporal con MediaPipe Pose",
+            style="Hint.TLabel",
+        ).pack(side="left", padx=(14, 0), pady=(5, 0))
+
+        content = ttk.Frame(self.root, padding=(12, 0, 12, 12))
+        content.pack(fill="both", expand=True)
+        preview = ttk.LabelFrame(
+            content,
+            text="  Vista de cámara y esqueleto  ",
+            style="Card.TLabelframe",
+            padding=10,
+        )
+        preview.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        self.canvas = tk.Canvas(
+            preview,
+            width=DISPLAY_W,
+            height=DISPLAY_H,
+            bg="#10161d",
+            highlightthickness=0,
+        )
+        self.canvas.pack(fill="both", expand=True)
         self.img_id = self.canvas.create_image(0, 0, anchor="nw")
         self.canvas.bind("<Button-1>", self.on_click)
-        ttk.Label(left, text="Clic sobre una persona para elegirla como objetivo",
-                  foreground="gray").pack(pady=(4, 0))
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
+        ttk.Label(
+            preview,
+            text="Haz clic dentro de una caja para elegir el cuerpo a seguir.",
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(6, 0))
 
-        right = ttk.Frame(self.root)
-        right.pack(side="right", fill="y", padx=8, pady=8)
+        right = ttk.Frame(content, width=310)
+        right.pack(side="right", fill="y")
+        right.pack_propagate(False)
 
-        # Modo
-        box_mode = ttk.LabelFrame(right, text="Modo")
+        box_mode = ttk.LabelFrame(
+            right, text="  Control de cámara  ", style="Card.TLabelframe", padding=8
+        )
         box_mode.pack(fill="x", pady=4)
         self.mode = tk.StringVar(value="fixed")
-        ttk.Radiobutton(box_mode, text="Seguir persona", value="follow",
-                        variable=self.mode, command=self.on_mode_change).pack(anchor="w", padx=6, pady=2)
-        ttk.Radiobutton(box_mode, text="Fijar cámara", value="fixed",
-                        variable=self.mode, command=self.on_mode_change).pack(anchor="w", padx=6, pady=2)
-        ttk.Button(box_mode, text="Fijar en la posición actual",
-                   command=self.hold_here).pack(fill="x", padx=6, pady=2)
-        ttk.Button(box_mode, text="Centrar servos (90° / 90°)",
-                   command=self.center).pack(fill="x", padx=6, pady=(2, 6))
+        ttk.Radiobutton(
+            box_mode, text="Seguir cuerpo seleccionado", value="follow",
+            variable=self.mode, command=self.on_mode_change,
+        ).pack(anchor="w", pady=3)
+        ttk.Radiobutton(
+            box_mode, text="Posición fija", value="fixed",
+            variable=self.mode, command=self.on_mode_change,
+        ).pack(anchor="w", pady=3)
+        ttk.Button(
+            box_mode, text="Mantener posición actual", command=self.hold_here
+        ).pack(fill="x", pady=(6, 3))
+        ttk.Button(
+            box_mode, text="Centrar servos (90° / 90°)", command=self.center
+        ).pack(fill="x", pady=3)
 
-        # Posición manual
-        box_pos = ttk.LabelFrame(right, text="Posición (modo fijo)")
+        box_pos = ttk.LabelFrame(
+            right, text="  Ajuste manual  ", style="Card.TLabelframe", padding=8
+        )
         box_pos.pack(fill="x", pady=4)
         self.pan_var = tk.DoubleVar(value=90)
         self.tilt_var = tk.DoubleVar(value=90)
-        ttk.Label(box_pos, text="Pan (izq ↔ der)").pack(anchor="w", padx=6)
-        self.pan_scale = tk.Scale(box_pos, from_=self.pt.pan_lim[0], to=self.pt.pan_lim[1],
-                                  orient="horizontal", resolution=0.5, length=220,
-                                  variable=self.pan_var)
-        self.pan_scale.pack(padx=6)
-        ttk.Label(box_pos, text="Tilt (abajo ↔ arriba)").pack(anchor="w", padx=6)
-        self.tilt_scale = tk.Scale(box_pos, from_=self.pt.tilt_lim[0], to=self.pt.tilt_lim[1],
-                                   orient="horizontal", resolution=0.5, length=220,
-                                   variable=self.tilt_var)
-        self.tilt_scale.pack(padx=6, pady=(0, 6))
+        ttk.Label(box_pos, text="Pan · izquierda / derecha").pack(anchor="w")
+        self.pan_scale = self._make_scale(
+            box_pos, self.pt.pan_lim[0], self.pt.pan_lim[1], 0.5, self.pan_var
+        )
+        self.pan_scale.pack(fill="x")
+        ttk.Label(box_pos, text="Tilt · abajo / arriba").pack(anchor="w")
+        self.tilt_scale = self._make_scale(
+            box_pos, self.pt.tilt_lim[0], self.pt.tilt_lim[1], 0.5, self.tilt_var
+        )
+        self.tilt_scale.pack(fill="x")
 
-        # Ajustes
-        box_set = ttk.LabelFrame(right, text="Ajustes de seguimiento")
+        box_set = ttk.LabelFrame(
+            right,
+            text="  Precisión y movimiento  ",
+            style="Card.TLabelframe",
+            padding=8,
+        )
         box_set.pack(fill="x", pady=4)
         self.kp_var = tk.DoubleVar(value=self.ctrl.kp)
         self.speed_var = tk.DoubleVar(value=self.pt.max_speed)
-        ttk.Label(box_set, text="Sensibilidad").pack(anchor="w", padx=6)
-        tk.Scale(box_set, from_=0.1, to=1.0, resolution=0.05, orient="horizontal",
-                 length=220, variable=self.kp_var).pack(padx=6)
-        ttk.Label(box_set, text="Velocidad máx. (°/s)").pack(anchor="w", padx=6)
-        tk.Scale(box_set, from_=20, to=200, resolution=5, orient="horizontal",
-                 length=220, variable=self.speed_var).pack(padx=6)
+        self.visibility_var = tk.DoubleVar(value=self.detector.min_visibility)
+        ttk.Label(box_set, text="Sensibilidad de seguimiento").pack(anchor="w")
+        self._make_scale(box_set, 0.1, 1.0, 0.05, self.kp_var).pack(fill="x")
+        ttk.Label(box_set, text="Velocidad máxima de servos (°/s)").pack(anchor="w")
+        self._make_scale(box_set, 20, 200, 5, self.speed_var).pack(fill="x")
+        ttk.Label(box_set, text="Confianza mínima de landmarks").pack(anchor="w")
+        self._make_scale(box_set, 0.1, 0.9, 0.05, self.visibility_var).pack(fill="x")
         self.inv_pan = tk.BooleanVar(value=False)
         self.inv_tilt = tk.BooleanVar(value=False)
-        ttk.Checkbutton(box_set, text="Invertir pan", variable=self.inv_pan).pack(anchor="w", padx=6)
-        ttk.Checkbutton(box_set, text="Invertir tilt", variable=self.inv_tilt).pack(anchor="w", padx=6, pady=(0, 6))
-        ttk.Button(right, text="Soltar objetivo", command=self.release_target).pack(fill="x", pady=2)
+        ttk.Checkbutton(box_set, text="Invertir pan", variable=self.inv_pan).pack(anchor="w")
+        ttk.Checkbutton(box_set, text="Invertir tilt", variable=self.inv_tilt).pack(anchor="w")
+        ttk.Button(right, text="Soltar objetivo", command=self.release_target).pack(
+            fill="x", pady=(4, 2)
+        )
 
-        # Estado
         self.status = tk.StringVar()
-        ttk.Label(right, textvariable=self.status, justify="left",
-                  relief="sunken", padding=6).pack(fill="x", pady=6)
-        ttk.Button(right, text="Salir", command=self.close).pack(fill="x", pady=2)
+        ttk.Label(
+            right,
+            textvariable=self.status,
+            justify="left",
+            relief="sunken",
+            padding=8,
+            wraplength=290,
+        ).pack(fill="x", pady=6)
+        ttk.Button(right, text="Cerrar aplicación", command=self.close).pack(
+            fill="x", pady=2
+        )
+
+    @staticmethod
+    def _make_scale(parent, low, high, resolution, variable):
+        return tk.Scale(
+            parent,
+            from_=low,
+            to=high,
+            orient="horizontal",
+            resolution=resolution,
+            variable=variable,
+            bg="#263442",
+            fg="#edf2f7",
+            troughcolor="#10161d",
+            highlightthickness=0,
+            activebackground="#56b4d3",
+        )
 
     # ---------- acciones de la GUI ----------
     def on_mode_change(self):
@@ -531,7 +686,11 @@ class App:
         self.target = None
 
     def on_click(self, event):
-        fx, fy = event.x / self.scale, event.y / self.scale
+        offset_x, offset_y = self.image_offset
+        fx = (event.x - offset_x) / self.scale
+        fy = (event.y - offset_y) / self.scale
+        if fx < 0 or fy < 0:
+            return
         hits = [b for b in self.boxes
                 if b[0] <= fx <= b[0] + b[2] and b[1] <= fy <= b[1] + b[3]]
         if hits:
@@ -573,9 +732,10 @@ class App:
         self.ctrl.invert_pan = self.inv_pan.get()
         self.ctrl.invert_tilt = self.inv_tilt.get()
         self.pt.max_speed = self.speed_var.get()
+        self.detector.min_visibility = self.visibility_var.get()
 
-        # 2) ¿hay un resultado de detección nuevo?  (se corrige UNA vez por resultado)
-        res_id, boxes, fw, fh = self.worker.latest()
+        # 2) Actualizar poses y corregir una vez por resultado nuevo.
+        res_id, poses, fw, fh = self.worker.latest()
         if res_id != self.last_res_id:
             now = time.monotonic()
             dt = now - self.last_res_time
@@ -583,8 +743,9 @@ class App:
             if dt > 0:
                 self.det_hz = 0.7 * self.det_hz + 0.3 * (1.0 / dt)
             self.last_res_id = res_id
-            self.boxes = boxes
-            self.target = self._select_target(boxes, fw)
+            self.poses = poses
+            self.boxes = [pose.box for pose in poses]
+            self.target = self._select_target(self.boxes, fw)
             if self.mode.get() == "follow" and self.target is not None:
                 self.ctrl.update(self.target, fw, fh)
 
@@ -609,33 +770,74 @@ class App:
                 else "Sin objetivo: cámara en espera"
         else:
             st = "Cámara fija"
-        self.status.set(f"{st}\nPan {pan:5.1f}°   Tilt {tilt:5.1f}°\n"
-                        f"Detección: {self.det_hz:4.1f} Hz ({self.detector.name})\n"
-                        f"Servos: {self.backend.name}")
+        self.status.set(
+            f"{st}\nPan {pan:5.1f}°   Tilt {tilt:5.1f}°\n"
+            f"Seguimiento: {self.det_hz:4.1f} Hz · cuerpos: {len(self.poses)}\n"
+            f"{self.detector.name}\nServos: {self.backend.name}"
+        )
 
     def _show_frame(self, frame):
+        self.latest_frame = frame
         fh, fw = frame.shape[:2]
-        s = DISPLAY_W / float(fw)
+        canvas_w = max(self.canvas.winfo_width(), DISPLAY_W)
+        canvas_h = max(self.canvas.winfo_height(), DISPLAY_H)
+        s = min(canvas_w / float(fw), canvas_h / float(fh))
         self.scale = s
-        dh = int(fh * s)
-        disp = cv2.resize(frame, (DISPLAY_W, dh))
-        if int(self.canvas.cget("height")) != dh:
-            self.canvas.config(height=dh)
+        display_w = max(1, round(fw * s))
+        display_h = max(1, round(fh * s))
+        offset_x = (canvas_w - display_w) // 2
+        offset_y = (canvas_h - display_h) // 2
+        self.image_offset = (offset_x, offset_y)
+        resized = cv2.resize(
+            frame, (display_w, display_h),
+            interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR,
+        )
+        disp = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+        disp[offset_y:offset_y + display_h, offset_x:offset_x + display_w] = resized
 
-        # cruz central
-        cx, cy = DISPLAY_W // 2, dh // 2
+        cx, cy = offset_x + display_w // 2, offset_y + display_h // 2
         cv2.line(disp, (cx - 15, cy), (cx + 15, cy), (255, 255, 255), 1)
         cv2.line(disp, (cx, cy - 15), (cx, cy + 15), (255, 255, 255), 1)
 
-        for b in self.boxes:
-            x, y, bw, bh = [int(v * s) for v in b]
-            is_target = (self.target is not None and b == self.target)
+        for pose in self.poses:
+            b = pose.box
+            is_target = self.target is not None and b == self.target
             color = (0, 255, 255) if is_target else (0, 200, 0)
-            cv2.rectangle(disp, (x, y), (x + bw, y + bh), color, 2 if is_target else 1)
+            x, y, bw, bh = b
+            x1 = (round(x * s) + offset_x, round(y * s) + offset_y)
+            x2 = (round((x + bw) * s) + offset_x, round((y + bh) * s) + offset_y)
+            cv2.rectangle(disp, x1, x2, color, 2 if is_target else 1)
+            for start, end in POSE_CONNECTIONS:
+                if (
+                    start >= len(pose.landmarks)
+                    or end >= len(pose.landmarks)
+                    or pose.landmarks[start][2] < self.detector.min_visibility
+                    or pose.landmarks[end][2] < self.detector.min_visibility
+                ):
+                    continue
+                p1 = (
+                    round(pose.landmarks[start][0] * s) + offset_x,
+                    round(pose.landmarks[start][1] * s) + offset_y,
+                )
+                p2 = (
+                    round(pose.landmarks[end][0] * s) + offset_x,
+                    round(pose.landmarks[end][1] * s) + offset_y,
+                )
+                cv2.line(disp, p1, p2, color, 2 if is_target else 1, cv2.LINE_AA)
+            for px, py, visibility in pose.landmarks:
+                if visibility >= self.detector.min_visibility:
+                    cv2.circle(
+                        disp,
+                        (round(px * s) + offset_x, round(py * s) + offset_y),
+                        2,
+                        color,
+                        -1,
+                        cv2.LINE_AA,
+                    )
 
         if self.target is not None:
-            tx = int((self.target[0] + self.target[2] / 2.0) * s)
-            ty = int((self.target[1] + self.target[3] * AIM_Y) * s)
+            tx = round((self.target[0] + self.target[2] / 2.0) * s) + offset_x
+            ty = round((self.target[1] + self.target[3] * AIM_Y) * s) + offset_y
             cv2.circle(disp, (tx, ty), 5, (0, 0, 255), -1)
             cv2.line(disp, (cx, cy), (tx, ty), (0, 0, 255), 1)
 
@@ -646,6 +848,10 @@ class App:
         rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(Image.fromarray(rgb))
         self.canvas.itemconfig(self.img_id, image=self.photo)
+
+    def _on_canvas_resize(self, _event):
+        if self.latest_frame is not None:
+            self._show_frame(self.latest_frame)
 
     # ---------- cierre ordenado ----------
     def close(self):
@@ -662,8 +868,10 @@ class App:
 
 
 # ----------------------------------------------------------------------------
-def parse_args():
-    p = argparse.ArgumentParser(description="Seguidor de persona con cámara pan/tilt")
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(
+        description="Seguimiento corporal con MediaPipe y cámara Pan/Tilt"
+    )
     g = p.add_argument_group("cámara")
     g.add_argument("--camera", type=int, default=0, help="índice de cámara USB (default 0)")
     g.add_argument("--picamera2", action="store_true", help="usar cámara CSI con Picamera2")
@@ -683,11 +891,31 @@ def parse_args():
     g.add_argument("--tilt-min", type=float, default=40)
     g.add_argument("--tilt-max", type=float, default=140)
 
-    g = p.add_argument_group("detector")
-    g.add_argument("--detector", choices=["auto", "hog", "ssd"], default="auto")
-    g.add_argument("--proto", default=os.path.join(HERE, "MobileNetSSD_deploy.prototxt"))
-    g.add_argument("--weights", default=os.path.join(HERE, "MobileNetSSD_deploy.caffemodel"))
-    return p.parse_args()
+    g = p.add_argument_group("MediaPipe Pose")
+    g.add_argument(
+        "--model",
+        default=os.path.join(HERE, "pose_landmarker_heavy.task"),
+        help="archivo .task del modelo Pose Landmarker (default: heavy local)",
+    )
+    g.add_argument(
+        "--max-poses",
+        type=positive_int,
+        default=3,
+        help="máximo de cuerpos a detectar (default 3)",
+    )
+    g.add_argument(
+        "--min-confidence",
+        type=confidence_value,
+        default=0.5,
+        help="confianza mínima del detector/tracker entre 0 y 1 (default 0.5)",
+    )
+    g.add_argument(
+        "--min-visibility",
+        type=confidence_value,
+        default=0.35,
+        help="visibilidad mínima de landmarks entre 0 y 1 (default 0.35)",
+    )
+    return p.parse_args(argv)
 
 
 def main():
