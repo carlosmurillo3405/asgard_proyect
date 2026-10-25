@@ -6,7 +6,7 @@ Aplicación de escritorio para compartir en tiempo real la pantalla seleccionada
 
 - Python 3.10 o posterior.
 - Tkinter disponible (`python3-tk` en algunas distribuciones Linux).
-- Una sesión gráfica. MSS funciona en Windows y en Linux con X11; la captura de escritorio Wayland depende del compositor y puede requerir iniciar una sesión X11.
+- Una sesión gráfica. MSS funciona en Windows y Linux/X11. En Wayland se usa `grim` en compositores compatibles con wlroots (por ejemplo, Sway); instala el paquete `grim`. En Wayland se comparte el escritorio completo. GNOME/KDE Wayland pueden no permitir la captura mediante `grim`: para esos escritorios, inicia una sesión X11/Xorg.
 
 Instala las dependencias desde la raíz del repositorio:
 
@@ -18,6 +18,12 @@ En Linux:
 
 ```bash
 python3 -m pip install -r "Pruebas/Video/Screen share/requirements.txt"
+```
+
+En Ubuntu/Debian con un compositor Wayland compatible con wlroots:
+
+```bash
+sudo apt install grim
 ```
 
 ## Relay local
@@ -66,6 +72,12 @@ Abre el puerto TCP configurado en el firewall y en el proveedor de hosting. En c
 | Excelente | 2560 × 1440 | 30 fps | 94 |
 
 La resolución capturada nunca se amplía. Si la red o el receptor no alcanzan la frecuencia de origen, el relay reemplaza los cuadros pendientes por el más reciente para evitar que el retraso siga creciendo. La vista local y la remota se adaptan al tamaño de sus paneles. Se puede escoger qué pantalla compartir antes de conectar.
+
+El selector **Vista** muestra todos los participantes en mosaicos o permite elegir **Solo: ...** para fijar un participante y ampliarlo. La previsualización del emisor y los cuadros recibidos se ajustan al panel manteniendo la imagen completa y su proporción.
+
+### Captura negra en Linux
+
+En X11/Xorg se utiliza MSS. Si se detecta una sesión Wayland, el cliente utiliza `grim` para capturar el escritorio completo, lo que evita la captura negra de XWayland en compositores compatibles con wlroots. Si no está instalado o el compositor no permite esa captura, la aplicación muestra un error en el estado; instala `grim` o inicia una sesión X11/Xorg. El permiso de captura de pantalla siempre lo controla la sesión/compositor.
 
 ## Privacidad y límites
 

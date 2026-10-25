@@ -4,6 +4,8 @@ import socket
 import struct
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -13,8 +15,11 @@ from Midgard_screen_share import (
     SHARE_PROFILES,
     ProtocolError,
     _RelayServer,
+    _capture_backend,
+    _capture_wayland_frame,
     _decode_frame,
     _fit_frame,
+    _get_monitors,
     _is_nonlocal_bind,
     _prepare_frame,
     _receive_packet,
@@ -93,6 +98,79 @@ class CaptureProfileTests(unittest.TestCase):
         for host in ("localhost", "127.0.0.1", "::1", "192.168.1.20", "10.0.0.8", "fe80::1"):
             with self.subTest(host=host):
                 self.assertFalse(_is_nonlocal_bind(host))
+
+    def test_wayland_uses_grim_capture_backend(self) -> None:
+        with (
+            patch("Midgard_screen_share.os.name", "posix"),
+            patch.dict(
+                "Midgard_screen_share.os.environ",
+                {"WAYLAND_DISPLAY": "wayland-0"},
+                clear=True,
+            ),
+            patch("Midgard_screen_share.shutil.which", return_value="/usr/bin/grim"),
+        ):
+            self.assertEqual(_capture_backend(), "grim")
+
+    def test_wayland_without_grim_reports_x11_alternative(self) -> None:
+        with (
+            patch("Midgard_screen_share.os.name", "posix"),
+            patch.dict(
+                "Midgard_screen_share.os.environ",
+                {"WAYLAND_DISPLAY": "wayland-0"},
+                clear=True,
+            ),
+            patch("Midgard_screen_share.shutil.which", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "X11/Xorg"):
+                _capture_backend()
+
+    def test_detects_wayland_from_session_type(self) -> None:
+        with (
+            patch("Midgard_screen_share.os.name", "posix"),
+            patch.dict(
+                "Midgard_screen_share.os.environ",
+                {"XDG_SESSION_TYPE": "wayland"},
+                clear=True,
+            ),
+            patch("Midgard_screen_share.shutil.which", return_value="/usr/bin/grim"),
+        ):
+            self.assertEqual(_capture_backend(), "grim")
+
+    def test_wayland_monitor_detection_does_not_require_mss(self) -> None:
+        with (
+            patch("Midgard_screen_share.os.name", "posix"),
+            patch.dict(
+                "Midgard_screen_share.os.environ",
+                {"WAYLAND_DISPLAY": "wayland-0"},
+                clear=True,
+            ),
+            patch("Midgard_screen_share.shutil.which", return_value="/usr/bin/grim"),
+            patch("Midgard_screen_share.mss.MSS") as mss_capture,
+        ):
+            self.assertEqual(_get_monitors(), [(1, "Escritorio completo (Wayland)")])
+        mss_capture.assert_not_called()
+
+    def test_grim_captures_selected_monitor_and_decodes_the_result(self) -> None:
+        encoded, png = cv2.imencode(
+            ".png", np.full((480, 640, 3), (10, 20, 30), dtype=np.uint8)
+        )
+        self.assertTrue(encoded)
+        monitor = {"left": 0, "top": 0, "width": 640, "height": 480}
+
+        with patch(
+            "Midgard_screen_share.subprocess.run",
+            return_value=SimpleNamespace(stdout=png.tobytes()),
+        ) as run:
+            frame = _capture_wayland_frame(monitor)
+
+        run.assert_called_once_with(
+            ["grim", "-g", "0,0 640x480", "-"],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+        self.assertEqual(frame.shape, (480, 640, 3))
+        np.testing.assert_array_equal(frame[0, 0], [10, 20, 30])
 
 
 class RelayIntegrationTests(unittest.TestCase):

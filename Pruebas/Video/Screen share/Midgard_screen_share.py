@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import hmac
 import ipaddress
 from io import BytesIO
 import json
 import os
 import queue
+import shutil
 import socket
 import socketserver
 import ssl
+import subprocess
 import struct
 import threading
 import time
@@ -442,12 +445,69 @@ def run_relay_server(
 
 
 def _get_monitors() -> list[tuple[int, str]]:
+    if _is_wayland_session():
+        _capture_backend()
+        return [(1, "Escritorio completo (Wayland)")]
     with mss.MSS() as capture:
         monitors = capture.monitors[1:]
         return [
             (index, f"Pantalla {index} ({monitor['width']} x {monitor['height']})")
             for index, monitor in enumerate(monitors, start=1)
         ]
+
+
+def _is_wayland_session() -> bool:
+    return os.name != "nt" and (
+        bool(os.environ.get("WAYLAND_DISPLAY"))
+        or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+    )
+
+
+def _capture_backend() -> str:
+    """Selecciona una captura Wayland mediante grim o el backend MSS habitual."""
+    if _is_wayland_session():
+        if shutil.which("grim") is None:
+            raise RuntimeError(
+                "Sesión Wayland detectada, pero no está instalado 'grim'. "
+                "Instálalo en un compositor compatible (wlroots), o inicia sesión "
+                "en X11/Xorg para capturar con MSS."
+            )
+        return "grim"
+    return "mss"
+
+
+def _capture_wayland_frame(monitor: dict[str, int] | None) -> np.ndarray:
+    command = ["grim"]
+    if monitor is not None:
+        geometry = (
+            f"{monitor['left']},{monitor['top']} "
+            f"{monitor['width']}x{monitor['height']}"
+        )
+        command.extend(["-g", geometry])
+    command.append("-")
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError(
+            "No se encontró 'grim'. Instálalo o usa una sesión X11/Xorg."
+        ) from error
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"grim no pudo capturar la pantalla: {detail}") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("grim tardó demasiado en capturar la pantalla.") from error
+
+    frame = cv2.imdecode(
+        np.frombuffer(result.stdout, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    if frame is None:
+        raise RuntimeError("grim no devolvió una imagen de pantalla válida.")
+    return frame
 
 
 class ScreenShareApp:
@@ -473,6 +533,8 @@ class ScreenShareApp:
         self.peer_names: dict[str, str] = {}
         self.monitor_names: dict[str, int] = {}
         self.connection_settings: list[tk.Widget] = []
+        self.layout_targets: dict[str, str | None] = {"Todos": None}
+        self.focused_peer_id: str | None = None
 
         self.host_value = tk.StringVar(value="127.0.0.1")
         self.port_value = tk.StringVar(value=str(DEFAULT_PORT))
@@ -482,6 +544,7 @@ class ScreenShareApp:
         self.tls_value = tk.BooleanVar(value=False)
         self.profile_value = tk.StringVar(value="Buena")
         self.monitor_value = tk.StringVar()
+        self.layout_value = tk.StringVar(value="Todos")
         self.status_value = tk.StringVar(value="Listo para conectar.")
         self._build_interface()
         self._add_tile("local", "Mi pantalla", "Comparte para mostrar tu pantalla")
@@ -559,8 +622,17 @@ class ScreenShareApp:
         )
         self.refresh_button.grid(row=3, column=5, sticky="ew")
         self.connection_settings.append(self.refresh_button)
+        ttk.Label(settings, text="Vista").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        self.layout_picker = ttk.Combobox(
+            settings,
+            textvariable=self.layout_value,
+            state="readonly",
+            values=("Todos",),
+        )
+        self.layout_picker.grid(row=4, column=1, columnspan=3, sticky="ew", padx=(0, 8))
+        self.layout_picker.bind("<<ComboboxSelected>>", self._change_layout)
         ttk.Label(settings, textvariable=self.status_value).grid(
-            row=4, column=0, columnspan=6, sticky="w", pady=(8, 0)
+            row=5, column=0, columnspan=6, sticky="w", pady=(8, 0)
         )
 
         self.video_area = tk.Frame(self.root, bg="#18212b", padx=8, pady=4)
@@ -572,9 +644,8 @@ class ScreenShareApp:
         if peer_id in self.tiles:
             self.tiles[peer_id][1].configure(text=title)
             return
-        index = len(self.tiles)
         tile = tk.Frame(self.video_area, bg="#263442", padx=5, pady=5)
-        tile.grid(row=index // 2, column=index % 2, sticky="nsew", padx=5, pady=5)
+        tile.grid(sticky="nsew", padx=5, pady=5)
         title_label = tk.Label(tile, text=title, anchor="w", bg="#263442", fg="#edf2f7")
         title_label.pack(fill=tk.X, pady=(0, 4))
         image_label = tk.Label(
@@ -588,7 +659,8 @@ class ScreenShareApp:
         image_label.pack(fill=tk.BOTH, expand=True)
         self.tiles[peer_id] = (tile, title_label, image_label)
         self.peer_names[peer_id] = title
-        self.video_area.rowconfigure(index // 2, weight=1)
+        self._update_layout_choices()
+        self._apply_layout()
 
     def _remove_tile(self, peer_id: str) -> None:
         tile_data = self.tiles.pop(peer_id, None)
@@ -601,8 +673,55 @@ class ScreenShareApp:
             self.incoming_frames.pop(peer_id, None)
         if tile_data is not None:
             tile_data[0].destroy()
+        if self.focused_peer_id == peer_id:
+            self.focused_peer_id = None
+            self.layout_value.set("Todos")
+        self._update_layout_choices()
+        self._apply_layout()
+
+    def _update_layout_choices(self) -> None:
+        self.layout_targets = {"Todos": None}
+        for peer_id, title in self.peer_names.items():
+            suffix = peer_id[:6] if peer_id != "local" else "local"
+            self.layout_targets[f"Solo: {title} [{suffix}]"] = peer_id
+        values = tuple(self.layout_targets)
+        self.layout_picker.configure(values=values)
+        if self.layout_value.get() not in self.layout_targets:
+            self.layout_value.set("Todos")
+
+    def _change_layout(self, _event: Any = None) -> None:
+        self.focused_peer_id = self.layout_targets.get(self.layout_value.get())
+        self._apply_layout()
+
+    def _apply_layout(self) -> None:
+        for row in range(MAX_ROOM_MEMBERS):
+            self.video_area.rowconfigure(row, weight=0)
+        for column in range(2):
+            self.video_area.columnconfigure(column, weight=0)
+
+        if self.focused_peer_id in self.tiles:
+            for peer_id, (tile, _, _) in self.tiles.items():
+                if peer_id == self.focused_peer_id:
+                    tile.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+                else:
+                    tile.grid_remove()
+            self.video_area.rowconfigure(0, weight=1)
+            self.video_area.columnconfigure(0, weight=1)
+            self.video_area.columnconfigure(1, weight=1)
+            return
+
         for index, (tile, _, _) in enumerate(self.tiles.values()):
-            tile.grid_configure(row=index // 2, column=index % 2)
+            tile.grid(
+                row=index // 2,
+                column=index % 2,
+                columnspan=1,
+                sticky="nsew",
+                padx=5,
+                pady=5,
+            )
+            self.video_area.rowconfigure(index // 2, weight=1)
+        for column in range(2):
+            self.video_area.columnconfigure(column, weight=1)
 
     def _refresh_monitors(self) -> None:
         try:
@@ -865,15 +984,29 @@ class ScreenShareApp:
             if not share_event.wait(0.1):
                 continue
             try:
-                with mss.MSS() as capture:
-                    if monitor_index is None or monitor_index >= len(capture.monitors):
-                        raise RuntimeError("La pantalla seleccionada ya no está disponible.")
-                    monitor = capture.monitors[monitor_index]
+                backend = _capture_backend()
+                capture_context = mss.MSS() if backend == "mss" else nullcontext(None)
+                with capture_context as capture:
+                    if backend == "grim":
+                        if monitor_index != 1:
+                            raise RuntimeError(
+                                "El escritorio Wayland seleccionado ya no está disponible."
+                            )
+                        monitor = None
+                    else:
+                        if capture is None or monitor_index is None or monitor_index >= len(capture.monitors):
+                            raise RuntimeError("La pantalla seleccionada ya no está disponible.")
+                        monitor = capture.monitors[monitor_index]
                     frame_delay = 1 / profile.frames_per_second
                     next_frame_at = time.monotonic()
                     while share_event.is_set() and not stop_event.is_set():
-                        screenshot = np.asarray(capture.grab(monitor), dtype=np.uint8)
-                        frame = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
+                        if backend == "grim":
+                            frame = _capture_wayland_frame(monitor)
+                        else:
+                            if capture is None or monitor is None:
+                                raise RuntimeError("No se pudo abrir la pantalla seleccionada.")
+                            screenshot = np.asarray(capture.grab(monitor), dtype=np.uint8)
+                            frame = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
                         frame = _prepare_frame(frame, profile)
                         with self.frame_lock:
                             self.pending_frames["local"] = frame
@@ -954,6 +1087,9 @@ class ScreenShareApp:
                     self.share_button.configure(
                         text="Iniciar compartir", state=tk.DISABLED
                     )
+                    self.focused_peer_id = None
+                    self.layout_value.set("Todos")
+                    self._update_layout_choices()
                     if not self.status_value.get().startswith("Error:"):
                         self.status_value.set("Desconectado.")
                     self._clear_remote_tiles()
@@ -974,6 +1110,10 @@ class ScreenShareApp:
             self.incoming_frames.clear()
         with self.outgoing_condition:
             self.outgoing_frame = None
+        self.focused_peer_id = None
+        self.layout_value.set("Todos")
+        self._update_layout_choices()
+        self._apply_layout()
 
     def _render_frames(self) -> None:
         sizes: dict[str, tuple[int, int]] = {}
@@ -990,6 +1130,8 @@ class ScreenShareApp:
             tile = self.tiles.get(peer_id)
             if tile is None:
                 continue
+            display_size = sizes.get(peer_id, (640, 360))
+            frame = _fit_frame(frame, *display_size)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             photo = ImageTk.PhotoImage(Image.fromarray(rgb))
             tile[2].configure(image=photo, text="")
