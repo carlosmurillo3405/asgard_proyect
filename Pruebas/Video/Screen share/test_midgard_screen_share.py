@@ -85,8 +85,14 @@ class CaptureProfileTests(unittest.TestCase):
 
     def test_nonlocal_server_requires_token_and_tls(self) -> None:
         self.assertTrue(_is_nonlocal_bind("0.0.0.0"))
+        self.assertTrue(_is_nonlocal_bind("8.8.8.8"))
         with self.assertRaisesRegex(ValueError, "token MIDGARD_SCREEN_TOKEN"):
             run_relay_server("0.0.0.0", 8766, None, None, None)
+
+    def test_loopback_and_private_lan_binds_allow_tokenless_testing(self) -> None:
+        for host in ("localhost", "127.0.0.1", "::1", "192.168.1.20", "10.0.0.8", "fe80::1"):
+            with self.subTest(host=host):
+                self.assertFalse(_is_nonlocal_bind(host))
 
 
 class RelayIntegrationTests(unittest.TestCase):

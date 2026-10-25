@@ -402,7 +402,13 @@ def _is_nonlocal_bind(host: str) -> bool:
         address = ipaddress.ip_address(host.split("%", 1)[0])
     except ValueError:
         return True
-    return not address.is_loopback
+    if address.is_unspecified:
+        return True
+    return not (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+    )
 
 
 def run_relay_server(

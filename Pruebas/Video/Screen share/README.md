@@ -28,7 +28,13 @@ En la máquina que actuará como servidor:
 py "Pruebas\Video\Screen share\Midgard_screen_share.py" --server --host 127.0.0.1 --port 8766
 ```
 
-Abre la aplicación en los dispositivos y conecta al host y puerto indicados. Para comunicar dos equipos de la misma red, inicia el relay con la IP local del servidor y permite el puerto TCP en el firewall. El relay requiere token y TLS si escucha en una dirección que no sea local.
+Para probar en un solo equipo, deja `127.0.0.1` y el campo **Token** vacío en el cliente. Para probar entre equipos de la misma red, inicia el relay enlazando la IP privada del servidor (por ejemplo, `192.168.1.20`) y deja también el token vacío:
+
+```powershell
+py "Pruebas\Video\Screen share\Midgard_screen_share.py" --server --host 192.168.1.20 --port 8766
+```
+
+En el cliente, escribe esa misma IP privada como servidor. Permite el puerto TCP en el firewall de la red local si Windows lo solicita. Las direcciones loopback, privadas y link-local permiten estas pruebas sin token ni TLS. **No uses una IP pública ni `0.0.0.0` para pruebas sin autenticación**: el relay exige token y TLS para esas direcciones.
 
 ## Relay en un host público
 
