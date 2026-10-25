@@ -6,20 +6,45 @@ persona haciendo clic en su cuadro. Funciona con Windows y Linux siempre que
 OpenCV pueda acceder a la cámara y exista una versión compatible de MediaPipe
 para el intérprete y la arquitectura utilizados.
 
-Ejecuta los comandos siguientes desde la carpeta de este README.
+Ejecuta los comandos desde la raíz del repositorio y usa el mismo entorno
+virtual para instalar las dependencias y ejecutar el programa. En Linux no
+siempre existe un comando `python`, y `python3` puede apuntar a otra versión
+sin MediaPipe.
 
 ## Preparación
 
-Instala las dependencias:
+MediaPipe requiere una versión de Python con wheel disponible para tu sistema.
+Python 3.12 está probado con este proyecto. Crea y activa un entorno virtual,
+instala las dependencias y ejecuta el programa con ese entorno.
+
+En Windows (PowerShell):
 
 ```powershell
-python -m pip install -r requirements-seguidor-corporal.txt
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r Pruebas\Functions\Midgard_IA_recognition\requirements-seguidor-corporal.txt
 ```
 
-Descarga el modelo **Pose Landmarker Heavy** desde la
+En Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r Pruebas/Functions/Midgard_IA_recognition/requirements-seguidor-corporal.txt
+```
+
+El modelo **Pose Landmarker Heavy** se guarda junto al script. Si no está
+presente, descárgalo desde la fuente oficial:
+
+```bash
+curl -fL \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task \
+  -o Pruebas/Functions/Midgard_IA_recognition/pose_landmarker_heavy.task
+```
+
+También puedes obtenerlo desde la
 [sección oficial de modelos de MediaPipe](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker#models)
-y guarda `pose_landmarker_heavy.task` junto al script. El modelo no se incluye
-en el repositorio. También se puede indicar su ruta con `--model`.
+o indicar otro archivo `.task` con `--model`.
 
 Para hardware Raspberry Pi, instala además `gpiozero` para GPIO o
 `adafruit-circuitpython-servokit` para PCA9685. La disponibilidad de MediaPipe
@@ -28,22 +53,38 @@ compatible hay que usar el ejemplo oficial de Raspberry Pi o compilar MediaPipe.
 
 ## Ejecución
 
-Simulación de servos (no requiere hardware Pan/Tilt):
+### Simulación completa en Linux
 
-```powershell
-python seguidor_corporal_pantilt.py --backend sim
-```
-
-Cámara USB distinta de la primera:
-
-```powershell
-python seguidor_corporal_pantilt.py --backend sim --camera 1
-```
-
-En Linux con servos conectados a GPIO:
+La simulación completa no accede a la cámara, no inicializa servos, no requiere
+el archivo de modelo y no ejecuta MediaPipe. Muestra una pose sintética que se
+mueve para probar el seguimiento y los controles desde la interfaz gráfica:
 
 ```bash
-python3 seguidor_corporal_pantilt.py --backend gpiozero --pan-pin 17 --tilt-pin 27
+./.venv/bin/python Pruebas/Functions/Midgard_IA_recognition/seguidor_corporal_pantilt.py --simulation
+```
+
+La ventana necesita una sesión gráfica de Linux (por ejemplo, `DISPLAY`
+configurado). Cierra con `Esc` o con el botón de cerrar.
+
+### Detección real con cámara
+
+Conecta o habilita una cámara, coloca a la persona dentro del encuadre y ejecuta
+este comando desde la raíz del repositorio. Usa cámara y MediaPipe reales, con
+los servos simulados para que puedas probarlo sin hardware Pan/Tilt:
+
+```bash
+./.venv/bin/python Pruebas/Functions/Midgard_IA_recognition/seguidor_corporal_pantilt.py --camera 0 --backend sim
+```
+
+En la ventana, selecciona `Seguir cuerpo seleccionado` y haz clic sobre la
+caja de la persona detectada. Para una cámara USB distinta, cambia `--camera 0`
+por su índice (por ejemplo, `--camera 1`). Si no aparece ninguna caja, revisa
+que la persona esté visible, bien iluminada y a una distancia adecuada.
+
+Para controlar servos reales en Raspberry Pi con GPIO:
+
+```bash
+./.venv/bin/python Pruebas/Functions/Midgard_IA_recognition/seguidor_corporal_pantilt.py --backend gpiozero --pan-pin 17 --tilt-pin 27
 ```
 
 Controles principales:

@@ -1,0 +1,11 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Downloaded MediaPipe model
+/Pruebas/Functions/Midgard_IA_recognition/pose_landmarker_heavy.task

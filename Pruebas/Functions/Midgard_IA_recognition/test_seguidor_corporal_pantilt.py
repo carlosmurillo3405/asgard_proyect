@@ -1,9 +1,19 @@
 import contextlib
 import io
+import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from seguidor_corporal_pantilt import parse_args, poses_from_landmarks
+import numpy as np
+
+from seguidor_corporal_pantilt import (
+    MediaPipePoseDetector,
+    SimulatedPoseDetector,
+    SimulationCamera,
+    parse_args,
+    poses_from_landmarks,
+)
 
 
 def landmark(x, y, visibility=1.0):
@@ -41,10 +51,40 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(args.min_visibility, 0.35)
         self.assertTrue(args.model.endswith("pose_landmarker_heavy.task"))
 
+    def test_simulation_mode_is_disabled_by_default(self):
+        self.assertTrue(parse_args(["--simulation"]).simulation)
+        self.assertFalse(parse_args([]).simulation)
+
     def test_confidence_is_limited_to_zero_through_one(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 parse_args(["--backend", "sim", "--min-confidence", "1.1"])
+
+
+class SimulationTests(unittest.TestCase):
+    def test_simulation_camera_generates_a_frame_without_a_camera(self):
+        camera = SimulationCamera(320, 240)
+        with patch("seguidor_corporal_pantilt.time.sleep"):
+            frame = camera.read()
+
+        self.assertEqual(frame.shape, (240, 320, 3))
+        self.assertEqual(frame.dtype.name, "uint8")
+
+    def test_simulated_pose_moves_across_the_frame(self):
+        detector = SimulatedPoseDetector()
+        frame = np.zeros((240, 320, 3), dtype="uint8")
+        first_pose = detector.detect(frame, 0)[0]
+        later_pose = detector.detect(frame, 1800)[0]
+
+        self.assertEqual(len(first_pose.landmarks), 33)
+        self.assertNotEqual(first_pose.box[0], later_pose.box[0])
+
+
+class MediaPipeDependencyTests(unittest.TestCase):
+    def test_missing_mediapipe_reports_active_interpreter(self):
+        with patch.dict("sys.modules", {"mediapipe": None}):
+            with self.assertRaisesRegex(RuntimeError, sys.executable):
+                MediaPipePoseDetector("unused-model.task")
 
 
 if __name__ == "__main__":

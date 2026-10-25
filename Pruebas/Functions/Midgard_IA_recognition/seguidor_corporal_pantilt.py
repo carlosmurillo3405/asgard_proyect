@@ -107,6 +107,41 @@ class Camera:
             pass
 
 
+class SimulationCamera:
+    """Genera un fondo de prueba sin acceder a una cámara física."""
+
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self._frame_index = 0
+
+    def read(self):
+        time.sleep(1 / 30)
+        frame = np.full((self.height, self.width, 3), (32, 38, 48), dtype=np.uint8)
+        center_x, center_y = self.width // 2, self.height // 2
+        for x in range(0, self.width, 40):
+            cv2.line(frame, (x, 0), (x, self.height), (42, 49, 60), 1)
+        for y in range(0, self.height, 40):
+            cv2.line(frame, (0, y), (self.width, y), (42, 49, 60), 1)
+        cv2.line(
+            frame, (center_x - 18, center_y), (center_x + 18, center_y),
+            (150, 150, 150), 1,
+        )
+        cv2.line(
+            frame, (center_x, center_y - 18), (center_x, center_y + 18),
+            (150, 150, 150), 1,
+        )
+        cv2.putText(
+            frame, "SIMULACION - sin camara", (16, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (220, 220, 220), 2,
+        )
+        self._frame_index += 1
+        return frame
+
+    def close(self):
+        pass
+
+
 class FrameGrabber(threading.Thread):
     """Lee la cámara continuamente y guarda solo el último frame (sin retraso)."""
 
@@ -182,6 +217,50 @@ def poses_from_landmarks(poses, frame_width, frame_height, min_visibility=0.35):
     return detections
 
 
+class SimulatedPoseDetector:
+    """Genera un cuerpo sintético que se desplaza para probar el seguimiento."""
+
+    _LANDMARKS = (
+        (0.50, 0.02), (0.47, 0.00), (0.46, 0.00), (0.44, 0.02),
+        (0.53, 0.00), (0.54, 0.00), (0.56, 0.02), (0.40, 0.05),
+        (0.60, 0.05), (0.47, 0.10), (0.53, 0.10), (0.35, 0.22),
+        (0.65, 0.22), (0.27, 0.40), (0.73, 0.40), (0.22, 0.58),
+        (0.78, 0.58), (0.19, 0.57), (0.81, 0.57), (0.23, 0.56),
+        (0.77, 0.56), (0.26, 0.58), (0.74, 0.58), (0.42, 0.52),
+        (0.58, 0.52), (0.40, 0.70), (0.60, 0.70), (0.39, 0.88),
+        (0.61, 0.88), (0.37, 0.90), (0.63, 0.90), (0.33, 0.89),
+        (0.67, 0.89),
+    )
+
+    def __init__(self, min_visibility=0.35):
+        self.min_visibility = min_visibility
+        self.name = "Detector de pose (simulado)"
+
+    def detect(self, frame, timestamp_ms):
+        frame_height, frame_width = frame.shape[:2]
+        center = 0.5 + 0.16 * math.sin(timestamp_ms / 1800.0)
+        body_width = frame_width * 0.55
+        top = frame_height * 0.06
+        body_height = frame_height * 0.88
+        landmarks = tuple(
+            (
+                center * frame_width + (x - 0.5) * body_width,
+                top + y * body_height,
+                1.0,
+            )
+            for x, y in self._LANDMARKS
+        )
+        visible_x = [point[0] for point in landmarks]
+        visible_y = [point[1] for point in landmarks]
+        x1, y1 = int(min(visible_x)), int(min(visible_y))
+        x2, y2 = int(max(visible_x)), int(max(visible_y))
+        box = (x1, y1, x2 - x1, y2 - y1)
+        return [BodyPose(box, landmarks)]
+
+    def close(self):
+        pass
+
+
 class MediaPipePoseDetector:
     """MediaPipe Pose Landmarker con seguimiento temporal y varias personas."""
 
@@ -196,8 +275,9 @@ class MediaPipePoseDetector:
             import mediapipe as mp
         except ImportError as error:
             raise RuntimeError(
-                "Falta MediaPipe. Instala las dependencias con: "
-                "python -m pip install -r requirements-seguidor-corporal.txt"
+                f"MediaPipe no está instalado para el intérprete {sys.executable}. "
+                "Activa el entorno de Python con las dependencias o instala "
+                "MediaPipe usando ese mismo intérprete."
             ) from error
         if not os.path.isfile(model_path):
             raise FileNotFoundError(
@@ -450,13 +530,17 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Escape>", lambda e: self.close())
 
-        self.detector = MediaPipePoseDetector(
-            args.model,
-            max_poses=args.max_poses,
-            min_confidence=args.min_confidence,
-            min_visibility=args.min_visibility,
-        )
-        self.backend = self._make_backend(args)
+        if args.simulation:
+            self.detector = SimulatedPoseDetector(args.min_visibility)
+            self.backend = SimBackend()
+        else:
+            self.detector = MediaPipePoseDetector(
+                args.model,
+                max_poses=args.max_poses,
+                min_confidence=args.min_confidence,
+                min_visibility=args.min_visibility,
+            )
+            self.backend = self._make_backend(args)
         try:
             self.pt = PanTilt(
                 self.backend,
@@ -468,7 +552,12 @@ class App:
             self.detector.close()
             raise
         try:
-            self.camera = Camera(args.camera, args.width, args.height, args.picamera2)
+            if args.simulation:
+                self.camera = SimulationCamera(args.width, args.height)
+            else:
+                self.camera = Camera(
+                    args.camera, args.width, args.height, args.picamera2
+                )
         except Exception:
             self.detector.close()
             self.pt.close()
@@ -871,6 +960,11 @@ class App:
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="Seguimiento corporal con MediaPipe y cámara Pan/Tilt"
+    )
+    p.add_argument(
+        "--simulation",
+        action="store_true",
+        help="simular cámara, detección y servos (no requiere hardware ni modelo)",
     )
     g = p.add_argument_group("cámara")
     g.add_argument("--camera", type=int, default=0, help="índice de cámara USB (default 0)")
