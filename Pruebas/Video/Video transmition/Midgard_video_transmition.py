@@ -8,6 +8,7 @@ sin limitar su resolución; solo la vista previa se ajusta al tamaño de su pane
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 import json
 import platform
 import queue
@@ -349,11 +350,28 @@ def _prepare_frame(
     return frame
 
 
-def _decode_received_frame(encoded_frame: bytes) -> np.ndarray:
-    """Decodifica un cuadro sin aplicar escalado ni compresión adicionales."""
-    # La interfaz adapta la imagen al panel más adelante, no en la recepción.
+def _decode_received_frame(
+    encoded_frame: bytes, max_width: int = 1920, max_height: int = 1080
+) -> np.ndarray:
+    """Decodifica un cuadro a una resolución suficiente para el panel destino."""
+    try:
+        with Image.open(BytesIO(encoded_frame)) as image:
+            width, height = image.size
+    except (OSError, ValueError) as error:
+        raise ProtocolError("No se pudo leer la imagen recibida.") from error
+
+    decode_flags = cv2.IMREAD_COLOR
+    for reduction, flag in (
+        (8, cv2.IMREAD_REDUCED_COLOR_8),
+        (4, cv2.IMREAD_REDUCED_COLOR_4),
+        (2, cv2.IMREAD_REDUCED_COLOR_2),
+    ):
+        if width // reduction >= max_width and height // reduction >= max_height:
+            decode_flags = flag
+            break
+
     frame = cv2.imdecode(
-        np.frombuffer(encoded_frame, dtype=np.uint8), cv2.IMREAD_COLOR
+        np.frombuffer(encoded_frame, dtype=np.uint8), decode_flags
     )
     if frame is None:
         raise ProtocolError("No se pudo decodificar un cuadro recibido.")
@@ -391,7 +409,10 @@ class VideoClientApp:
         self.active_socket: socket.socket | None = None
         self.active_send_lock = threading.Lock()
         self.frame_lock = threading.Lock()
-        self.pending_frames: dict[str, np.ndarray | bytes] = {}
+        self.frame_condition = threading.Condition()
+        self.incoming_frames: dict[str, bytes] = {}
+        self.display_sizes: dict[str, tuple[int, int]] = {}
+        self.pending_frames: dict[str, np.ndarray] = {}
         self.tiles: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
         self.photo_images: dict[str, ImageTk.PhotoImage] = {}
         self.camera_names: dict[str, int] = {}
@@ -518,6 +539,9 @@ class VideoClientApp:
         self.photo_images.pop(peer_id, None)
         with self.frame_lock:
             self.pending_frames.pop(peer_id, None)
+            self.display_sizes.pop(peer_id, None)
+        with self.frame_condition:
+            self.incoming_frames.pop(peer_id, None)
         if tile_data is not None:
             tile_data[0].destroy()
         self._reflow_tiles()
@@ -611,6 +635,7 @@ class VideoClientApp:
         connection: socket.socket | None = None
         camera: cv2.VideoCapture | None = None
         receiver: threading.Thread | None = None
+        frame_processor: threading.Thread | None = None
         try:
             connection = socket.create_connection((host, port), timeout=8)
             if stop_event.is_set():
@@ -641,6 +666,12 @@ class VideoClientApp:
                 daemon=True,
             )
             receiver.start()
+            frame_processor = threading.Thread(
+                target=self._process_received_frames,
+                args=(stop_event,),
+                daemon=True,
+            )
+            frame_processor.start()
 
             if camera_index is not None:
                 camera = cv2.VideoCapture(camera_index, _camera_backend())
@@ -716,6 +747,10 @@ class VideoClientApp:
                 connection.close()
             if receiver is not None and receiver.is_alive():
                 receiver.join(timeout=1)
+            with self.frame_condition:
+                self.frame_condition.notify_all()
+            if frame_processor is not None and frame_processor.is_alive():
+                frame_processor.join(timeout=1)
             if self.active_socket is connection:
                 self.active_socket = None
             self.events.put(("disconnected", None))
@@ -739,10 +774,11 @@ class VideoClientApp:
                         )
                     if not data:
                         raise ProtocolError("El cuadro de video está vacío.")
-                    # Reemplazar el cuadro pendiente evita acumular retraso si la
-                    # interfaz o la decodificación no alcanzan la frecuencia de envío.
-                    with self.frame_lock:
-                        self.pending_frames[peer_id] = data
+                    # La recepción no espera a la decodificación; solo conserva
+                    # el cuadro más reciente mientras el procesador trabaja.
+                    with self.frame_condition:
+                        self.incoming_frames[peer_id] = data
+                        self.frame_condition.notify()
                     if peer_id not in announced_peers:
                         announced_peers.add(peer_id)
                         self.events.put(("peer_name", (peer_id, name)))
@@ -754,6 +790,32 @@ class VideoClientApp:
             if not stop_event.is_set():
                 self.events.put(("error", f"Se perdió la conexión: {error}"))
                 stop_event.set()
+
+    def _process_received_frames(self, stop_event: threading.Event) -> None:
+        """Decodifica y adapta los cuadros recibidos fuera del hilo de la interfaz."""
+        while not stop_event.is_set():
+            with self.frame_condition:
+                self.frame_condition.wait_for(
+                    lambda: bool(self.incoming_frames) or stop_event.is_set(),
+                    timeout=0.1,
+                )
+                if stop_event.is_set():
+                    return
+                incoming = self.incoming_frames.copy()
+                self.incoming_frames.clear()
+
+            for peer_id, encoded_frame in incoming.items():
+                with self.frame_lock:
+                    target_size = self.display_sizes.get(peer_id, (640, 360))
+                try:
+                    frame = _decode_received_frame(encoded_frame, *target_size)
+                except ProtocolError as error:
+                    self.events.put(("error", f"Se perdió la conexión: {error}"))
+                    stop_event.set()
+                    return
+                frame = _fit_frame_to_display(frame, *target_size)
+                with self.frame_lock:
+                    self.pending_frames[peer_id] = frame
 
     def _process_events(self) -> None:
         """Aplica en el hilo de Tk los cambios enviados por los hilos de trabajo."""
@@ -816,10 +878,20 @@ class VideoClientApp:
                 self._remove_video_tile(peer_id)
         with self.frame_lock:
             self.pending_frames.clear()
+            self.display_sizes.clear()
+        with self.frame_condition:
+            self.incoming_frames.clear()
 
     def _render_frames(self) -> None:
-        """Decodifica y muestra solo los cuadros nuevos, hasta 30 veces por segundo."""
+        """Muestra los cuadros ya procesados sin bloquear la interfaz con decodificación."""
+        display_sizes: dict[str, tuple[int, int]] = {}
+        for peer_id, (_, _, video_label) in self.tiles.items():
+            display_sizes[peer_id] = (
+                max(video_label.winfo_width(), 160),
+                max(video_label.winfo_height(), 120),
+            )
         with self.frame_lock:
+            self.display_sizes.update(display_sizes)
             pending_frames = self.pending_frames.copy()
             self.pending_frames.clear()
         for peer_id, frame in pending_frames.items():
@@ -827,16 +899,7 @@ class VideoClientApp:
             if tile_data is None:
                 continue
             video_label = tile_data[2]
-            if isinstance(frame, bytes):
-                try:
-                    frame = _decode_received_frame(frame)
-                except ProtocolError as error:
-                    self.status_value.set(f"Error: {error}")
-                    continue
-            target_width = max(video_label.winfo_width(), 160)
-            target_height = max(video_label.winfo_height(), 120)
-            resized = _fit_frame_to_display(frame, target_width, target_height)
-            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             photo = ImageTk.PhotoImage(Image.fromarray(rgb))
             video_label.configure(image=photo, text="")
             self.photo_images[peer_id] = photo

@@ -51,6 +51,16 @@ class ReceiveQualityTests(unittest.TestCase):
 
         self.assertEqual(received.shape, source.shape)
 
+    def test_received_frame_uses_reduced_decode_for_smaller_display(self) -> None:
+        """Un panel pequeño evita decodificar Full HD a resolución completa."""
+        source = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        encoded, jpeg = cv2.imencode(".jpg", source)
+        self.assertTrue(encoded)
+
+        received = _decode_received_frame(jpeg.tobytes(), 640, 360)
+
+        self.assertEqual(received.shape, (540, 960, 3))
+
     def test_display_frame_fits_panel_and_preserves_aspect_ratio(self) -> None:
         """La vista previa cabe en el panel sin deformar la imagen."""
         source = np.zeros((480, 640, 3), dtype=np.uint8)
