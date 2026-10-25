@@ -8,6 +8,7 @@ import numpy as np
 from Midgard_video_transmition import (
     TRANSMISSION_PROFILES,
     _decode_received_frame,
+    _fit_frame_to_display,
     _prepare_frame,
 )
 
@@ -49,6 +50,15 @@ class ReceiveQualityTests(unittest.TestCase):
         received = _decode_received_frame(jpeg.tobytes())
 
         self.assertEqual(received.shape, source.shape)
+
+    def test_display_frame_fits_panel_and_preserves_aspect_ratio(self) -> None:
+        """La vista previa cabe en el panel sin deformar la imagen."""
+        source = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        displayed = _fit_frame_to_display(source, 320, 180)
+
+        self.assertEqual(displayed.shape, (180, 240, 3))
+        self.assertEqual(source.shape, (480, 640, 3))
 
 
 if __name__ == "__main__":

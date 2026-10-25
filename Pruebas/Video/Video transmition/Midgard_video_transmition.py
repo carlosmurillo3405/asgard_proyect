@@ -15,6 +15,7 @@ import socket
 import socketserver
 import struct
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -359,6 +360,22 @@ def _decode_received_frame(encoded_frame: bytes) -> np.ndarray:
     return frame
 
 
+def _fit_frame_to_display(
+    frame: np.ndarray, target_width: int, target_height: int
+) -> np.ndarray:
+    """Ajusta un cuadro a su panel conservando la proporción original."""
+    height, width = frame.shape[:2]
+    scale = min(target_width / width, target_height / height)
+    if scale == 1:
+        return frame
+    resized = cv2.resize(
+        frame,
+        (max(1, round(width * scale)), max(1, round(height * scale))),
+        interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR,
+    )
+    return resized
+
+
 class VideoClientApp:
     """Construye la interfaz de cliente y coordina cámara, red y vista previa."""
 
@@ -374,9 +391,8 @@ class VideoClientApp:
         self.active_socket: socket.socket | None = None
         self.active_send_lock = threading.Lock()
         self.frame_lock = threading.Lock()
-        self.pending_frames: dict[str, np.ndarray] = {}
+        self.pending_frames: dict[str, np.ndarray | bytes] = {}
         self.tiles: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
-        self.frames: dict[str, np.ndarray] = {}
         self.photo_images: dict[str, ImageTk.PhotoImage] = {}
         self.camera_names: dict[str, int] = {}
 
@@ -393,7 +409,7 @@ class VideoClientApp:
         self._add_video_tile("local", "Mi cámara")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(40, self._process_events)
-        self.root.after(100, self._render_frames)
+        self.root.after(33, self._render_frames)
         threading.Thread(target=self._refresh_cameras, daemon=True).start()
 
     def _build_interface(self) -> None:
@@ -499,7 +515,6 @@ class VideoClientApp:
     def _remove_video_tile(self, peer_id: str) -> None:
         """Libera el panel y los cuadros asociados con un participante que salió."""
         tile_data = self.tiles.pop(peer_id, None)
-        self.frames.pop(peer_id, None)
         self.photo_images.pop(peer_id, None)
         with self.frame_lock:
             self.pending_frames.pop(peer_id, None)
@@ -642,11 +657,13 @@ class VideoClientApp:
                     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, profile.max_height)
                     camera.set(cv2.CAP_PROP_FPS, profile.frames_per_second)
 
-            # El límite de cuadros por segundo se aplica a la transmisión saliente.
+            # El plazo evita sumar el tiempo de codificación y red a cada intervalo.
             frame_delay = 1 / profile.frames_per_second
+            next_frame_at = time.monotonic()
             while not stop_event.is_set():
                 if camera is None:
                     stop_event.wait(0.1)
+                    next_frame_at = time.monotonic()
                     continue
 
                 success, frame = camera.read()
@@ -671,7 +688,12 @@ class VideoClientApp:
                     jpeg.tobytes(),
                     self.active_send_lock,
                 )
-                stop_event.wait(frame_delay)
+                next_frame_at += frame_delay
+                remaining = next_frame_at - time.monotonic()
+                if remaining > 0:
+                    stop_event.wait(remaining)
+                else:
+                    next_frame_at = time.monotonic()
         except (
             OSError,
             ConnectionError,
@@ -701,7 +723,7 @@ class VideoClientApp:
     def _receive_video(
         self, connection: socket.socket, stop_event: threading.Event
     ) -> None:
-        """Decodifica cada cuadro recibido a su resolución completa, sin recomprimirlo."""
+        """Conserva solo el último JPEG recibido para decodificarlo al mostrarlo."""
         # Notificar una sola vez por participante evita llenar la cola con nombres
         # cuando llegan cuadros a una frecuencia mayor que la de la interfaz.
         announced_peers: set[str] = set()
@@ -715,11 +737,12 @@ class VideoClientApp:
                         raise ProtocolError(
                             "El cuadro recibido no identifica al participante."
                         )
-                    decoded = _decode_received_frame(data)
-                    # Se conserva el cuadro decodificado completo; no se aplica el
-                    # perfil local de envío ni se reduce su resolución al recibir.
+                    if not data:
+                        raise ProtocolError("El cuadro de video está vacío.")
+                    # Reemplazar el cuadro pendiente evita acumular retraso si la
+                    # interfaz o la decodificación no alcanzan la frecuencia de envío.
                     with self.frame_lock:
-                        self.pending_frames[peer_id] = decoded
+                        self.pending_frames[peer_id] = data
                     if peer_id not in announced_peers:
                         announced_peers.add(peer_id)
                         self.events.put(("peer_name", (peer_id, name)))
@@ -791,36 +814,33 @@ class VideoClientApp:
         for peer_id in list(self.tiles):
             if peer_id != "local":
                 self._remove_video_tile(peer_id)
-        self.frames.pop("local", None)
         with self.frame_lock:
             self.pending_frames.clear()
 
     def _render_frames(self) -> None:
-        """Escala las vistas previas al panel; mantiene intactos los cuadros recibidos."""
+        """Decodifica y muestra solo los cuadros nuevos, hasta 30 veces por segundo."""
         with self.frame_lock:
-            self.frames.update(self.pending_frames)
+            pending_frames = self.pending_frames.copy()
             self.pending_frames.clear()
-        for peer_id, frame in list(self.frames.items()):
+        for peer_id, frame in pending_frames.items():
             tile_data = self.tiles.get(peer_id)
             if tile_data is None:
                 continue
             video_label = tile_data[2]
-            # El reescalado es solo de presentación; el cuadro original permanece en
-            # memoria para conservar la mayor resolución recibida disponible.
+            if isinstance(frame, bytes):
+                try:
+                    frame = _decode_received_frame(frame)
+                except ProtocolError as error:
+                    self.status_value.set(f"Error: {error}")
+                    continue
             target_width = max(video_label.winfo_width(), 160)
             target_height = max(video_label.winfo_height(), 120)
-            height, width = frame.shape[:2]
-            scale = min(target_width / width, target_height / height)
-            resized = cv2.resize(
-                frame,
-                (max(1, round(width * scale)), max(1, round(height * scale))),
-                interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR,
-            )
+            resized = _fit_frame_to_display(frame, target_width, target_height)
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             photo = ImageTk.PhotoImage(Image.fromarray(rgb))
             video_label.configure(image=photo, text="")
             self.photo_images[peer_id] = photo
-        self.root.after(100, self._render_frames)
+        self.root.after(33, self._render_frames)
 
     def close(self) -> None:
         """Señala el cierre a los hilos y destruye la ventana principal."""
