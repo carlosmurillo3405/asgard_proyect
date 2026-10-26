@@ -1,0 +1,81 @@
+; =============================================================================
+; Configuración de Asgard
+; Copia este archivo como asgard.ini (el instalador lo hace por ti).
+; Valores sí/no: si, no. Los comentarios empiezan con ';'.
+; =============================================================================
+
+[bifrost]
+servidor = auto              ; IP o dominio de Bifröst; "auto" lo busca en la red local
+puerto = 8765                ; puerto TCP de Bifröst
+tls = no                     ; si = conexión cifrada (obligatorio con Bifröst en modo público)
+huella_tls =                 ; huella SHA-256 del certificado (main.py huella en Bifröst)
+ca_tls =                     ; o bien: archivo de CA/certificado de Bifröst
+tls_inseguro = no            ; si = no validar el certificado (solo pruebas)
+dispositivo =                ; identificador registrado: main.py asgard registrar <id>
+secreto =                    ; secreto que mostró Bifröst al registrar el Asgard
+
+[video]
+; Asgard siempre emite en esta calidad (Midgard no puede bajarla).
+camara = 0                   ; índice de cámara USB (0, 1...), picamera2 o simulacion
+ancho = 1920
+alto = 1080
+fps = 30
+calidad_jpeg = 90            ; 1-100
+campo_vision = 62            ; campo de visión horizontal de la cámara (grados)
+rotacion = 0                 ; 0, 90, 180 o 270 si la cámara está montada girada
+espejo = no
+
+[audio]
+; El audio siempre viaja en máxima calidad: PCM 48 kHz, 16 bits, estéreo si el micrófono lo permite.
+activado = si
+entrada =                    ; micrófono: vacío = predeterminado, índice o parte del nombre
+salida =                     ; altavoz: vacío = predeterminado, índice o parte del nombre
+canales = 2                  ; 1 mono o 2 estéreo
+colchon_ms = 40              ; colchón de red inicial (crece solo si hay cortes)
+transporte = auto            ; auto = UDP con respaldo TCP; tcp = solo TCP
+latencia = low               ; low o high (usa high si el audio se entrecorta en la Pi)
+sonido_mano = si             ; tono al levantar la mano
+sonido_chat = si             ; tono al recibir un mensaje
+
+[servos]
+controlador = gpiozero       ; gpiozero (GPIO directo), pca9685 (I2C) o sim
+pin_pan = 17                 ; GPIO del servo horizontal (gpiozero)
+pin_tilt = 27                ; GPIO del servo vertical (gpiozero)
+canal_pan = 0                ; canal PCA9685 del pan
+canal_tilt = 1               ; canal PCA9685 del tilt
+pan_min = 10
+pan_max = 170
+tilt_min = 40
+tilt_max = 140
+reposo_pan = 90              ; posición al terminar una sesión
+reposo_tilt = 90
+pulso_min_us = 500           ; pulso del servo a 0°
+pulso_max_us = 2400          ; pulso del servo a 180°
+velocidad_max = 90           ; grados por segundo
+invertir_pan = no
+invertir_tilt = no
+soltar_en_reposo = si        ; deja de enviar pulsos en reposo (evita temblor)
+
+[mano]
+tipo = servo                 ; servo, gpio (relé/solenoide), sim o ninguno
+controlador =                ; vacío = el mismo de [servos]; gpiozero, pca9685 o sim
+pin = 22                     ; GPIO del servo o de la salida digital
+canal = 2                    ; canal PCA9685 (si el controlador es pca9685)
+angulo_reposo = 0
+angulo_levantada = 150
+bajar_automatico_s = 0       ; 0 = queda levantada hasta que Midgard la baje
+activo_alto = si             ; solo para tipo gpio
+
+[ia]
+activada = si
+modelo = full                ; lite (rápido), full (equilibrado), heavy (preciso) o ruta a .task
+max_personas = 3
+confianza_min = 0.5
+visibilidad_min = 0.35
+ancho_analisis = 640         ; la IA analiza una copia reducida (más rápido)
+frecuencia_max = 15          ; detecciones por segundo como máximo
+punto_mira = 0.35            ; altura del cuerpo a centrar (0 = cabeza, 0.5 = torso)
+
+[pantalla]
+modo = completa              ; completa, ventana o ninguna (sin monitor)
+tamano_chat = 20             ; tamaño de letra de los mensajes

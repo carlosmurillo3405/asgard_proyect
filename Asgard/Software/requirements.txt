@@ -1,0 +1,8 @@
+# Asgard: dependencias base (Raspberry Pi OS de 64 bits, Python 3.10+).
+# gpiozero, lgpio y picamera2 se instalan con apt y se usan desde el entorno
+# virtual creado con --system-site-packages (lo hace instalar.sh).
+numpy>=1.24
+opencv-contrib-python>=4.8   # misma variante de OpenCV que instala MediaPipe (evita dos cv2)
+Pillow>=10.0
+sounddevice>=0.4.6
+cryptography>=41

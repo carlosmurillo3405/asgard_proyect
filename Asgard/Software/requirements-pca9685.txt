@@ -1,0 +1,2 @@
+# Solo si los servos o la mano usan un controlador PCA9685 por I2C.
+adafruit-circuitpython-servokit>=1.3

@@ -1,0 +1,3 @@
+# Reconocimiento corporal (opcional): si no se puede instalar, Asgard funciona
+# sin seguimiento automático (control manual de la cámara).
+mediapipe>=0.10.14

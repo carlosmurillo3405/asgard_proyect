@@ -1,0 +1,8 @@
+# Midgard: cliente de usuario (Windows, Linux y macOS, Python 3.10+).
+# Tkinter viene con Python (en Linux: paquete python3-tk).
+numpy>=1.24
+opencv-python>=4.8
+Pillow>=10.0
+sounddevice>=0.4.6
+mss>=9.0
+cryptography>=41

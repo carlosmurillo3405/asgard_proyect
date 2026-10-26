@@ -1,0 +1,6 @@
+# Finales de línea correctos aunque el repositorio se clone en Windows:
+# los scripts y configuraciones de Linux deben quedar con LF.
+*.sh    text eol=lf
+*.conf  text eol=lf
+*.ps1   text eol=crlf
+*.bat   text eol=crlf

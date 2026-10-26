@@ -1,0 +1,2 @@
+# Bifröst: servidor (Linux). El resto es biblioteca estándar de Python 3.10+.
+cryptography>=41        # TLS autofirmado y cifrado del audio UDP

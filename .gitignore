@@ -9,3 +9,18 @@ __pycache__/
 
 # Downloaded MediaPipe model
 /Pruebas/Functions/Midgard_IA_recognition/pose_landmarker_heavy.task
+
+# Datos y archivos generados por los programas (no se versionan)
+/Bifr*st/datos/
+/Asgard/Software/asgard.ini
+/Asgard/Software/estado_asgard.json
+/Asgard/Software/estado_asgard.tmp
+/Asgard/Software/modelos/
+/Asgard/Software/registros/
+/Asgard/Software/.restricciones-pip.txt
+/Midgard/Software/build/
+/Midgard/Software/dist/
+/Midgard/Software/iniciar_midgard.bat
+/Midgard/Software/midgard.sh
+/Midgard/Software/Midgard.command
+*.log
