@@ -4,9 +4,9 @@
 
 Uso::
 
-    python main.py
-    python main.py --servidor 192.168.1.20 --usuario ana
-    python main.py --servidor bifrost.midominio.com --tls
+    python main.py                                   # servidor automático (servidor.json o red local)
+    python main.py --usuario ana
+    python main.py --servidor bifrost.midominio.com --tls   # servidor fijado a mano
 
 Consulta README.md para la guía completa.
 """
@@ -36,24 +36,23 @@ def _utf8_output() -> None:
                 pass
 
 
-def _dpi_awareness() -> None:
-    """En Windows evita que la ventana se vea borrosa en pantallas con escalado."""
+def _windows_app_id() -> None:
+    """En Windows, la barra de tareas muestra el icono de Midgard (no el de Python)."""
     if platform.system() != "Windows":
         return
     try:
         import ctypes
 
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SistemaAsgard.Midgard")
     except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
+        pass
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="main.py", description="Midgard: controla un Asgard a través de Bifröst.")
-    parser.add_argument("--servidor", help="host[:puerto] de Bifröst; conecta al abrir")
+    parser.add_argument("--servidor", help="host[:puerto] de Bifröst (fija el servidor a mano)")
+    parser.add_argument("--automatico", action="store_true",
+                        help="vuelve al servidor automático (servidor.json o red local)")
     parser.add_argument("--tls", action="store_true", help="usar conexión cifrada (Bifröst en modo público)")
     parser.add_argument("--huella", help="huella SHA-256 del certificado de Bifröst")
     parser.add_argument("--usuario", help="usuario a mostrar en el acceso")
@@ -70,9 +69,9 @@ def setup_logging(level: str, console: bool = True) -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper()))
     if console and sys.stderr is not None:
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        root.addHandler(console)
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
     try:
         folder = config_dir()
         folder.mkdir(parents=True, exist_ok=True)
@@ -88,25 +87,35 @@ def check_installation() -> int:
     log = logging.getLogger("midgard")
     problems = 0
     checks = [
-        ("Interfaz (Tkinter)", "import tkinter; tkinter.Tcl()"),
+        ("Interfaz (Qt)", "from midgard import qt; detalle = qt.description()"),
         ("OpenCV", "import cv2"),
         ("NumPy", "import numpy"),
-        ("Pillow", "from PIL import ImageTk"),
+        ("Pillow", "import PIL.Image"),
         ("Audio (sounddevice/PortAudio)", "import sounddevice; sounddevice.query_devices()"),
         ("Captura de pantalla (MSS)", "import mss"),
         ("Cifrado (cryptography)", "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
         ("Midgard", "import midgard.interfaz, midgard.sesion"),
     ]
     for label, statement in checks:
+        namespace: dict[str, object] = {}
         try:
-            exec(statement, {})
-            message = f"OK     {label}"
+            exec(statement, namespace)
+            detail = namespace.get("detalle")
+            message = f"OK     {label}" + (f": {detail}" if detail else "")
         except Exception as error:  # se informa cualquier fallo de importación
             problems += 1
             message = f"FALLA  {label}: {error}"
         log.info(message)
         if sys.stdout is not None:
             print(message)
+    from midgard.conexion import load_provisioning
+
+    choice = load_provisioning()
+    message = (f"OK     Servidor predeterminado: {choice.describe()}" if choice
+               else "aviso  Sin servidor.json: se buscará Bifröst en la red local")
+    log.info(message)
+    if sys.stdout is not None:
+        print(message)
     return 1 if problems else 0
 
 
@@ -129,31 +138,26 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
     if args.servidor:
         host, _, port = args.servidor.rpartition(":") if args.servidor.count(":") == 1 else (args.servidor, "", "")
+        settings.server_mode = "manual"
         settings.host = host or args.servidor
-        settings.port = int(port) if port.isdigit() else (settings.port or DEFAULT_PORT)
-    if args.tls:
-        settings.tls = True
-    if args.huella:
-        settings.fingerprint = args.huella
+        settings.port = int(port) if port.isdigit() else DEFAULT_PORT
+        settings.tls = args.tls
+        settings.fingerprint = args.huella or ""
+    elif args.automatico:
+        settings.server_mode = "auto"
     if args.usuario:
         settings.username = args.usuario
 
-    _dpi_awareness()
-    import tkinter as tk
-
-    from midgard.interfaz import MidgardWindow
+    _windows_app_id()
+    from midgard.interfaz import ejecutar
     from midgard.sesion import MidgardController
 
-    root = tk.Tk()
     controller = MidgardController(settings, use_audio_devices=not args.sin_audio)
-    window = MidgardWindow(root, controller, settings)
-    if args.servidor:
-        root.after(200, window.connect)
     try:
-        root.mainloop()
+        return ejecutar(controller, settings)
     except KeyboardInterrupt:
-        window.close()
-    return 0
+        controller.shutdown()
+        return 0
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 # Midgard: cliente de usuario (Windows, Linux y macOS, Python 3.10+).
-# Tkinter viene con Python (en Linux: paquete python3-tk).
+# La interfaz usa Qt (PySide6, licencia LGPL); en Linux necesita las bibliotecas xcb del sistema
+# (el instalador las agrega).
+PySide6-Essentials>=6.6
 numpy>=1.24
 opencv-python>=4.8
 Pillow>=10.0

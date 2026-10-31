@@ -108,6 +108,7 @@ class AiConfig:
 class ScreenConfig:
     mode: str = "completa"
     chat_font_size: int = 20
+    diagnostics: bool = False
 
 
 @dataclass
@@ -168,7 +169,7 @@ SECTIONS: dict[str, tuple[str, dict[str, str]]] = {
         "confianza_min": "min_confidence", "visibilidad_min": "min_visibility",
         "ancho_analisis": "analysis_width", "frecuencia_max": "max_hz", "punto_mira": "aim_y",
     }),
-    "pantalla": ("screen", {"modo": "mode", "tamano_chat": "chat_font_size"}),
+    "pantalla": ("screen", {"modo": "mode", "tamano_chat": "chat_font_size", "diagnostico": "diagnostics"}),
 }
 
 _TRUE = {"si", "sí", "s", "yes", "y", "true", "1", "on", "verdadero"}

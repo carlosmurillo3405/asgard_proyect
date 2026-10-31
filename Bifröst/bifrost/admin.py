@@ -6,23 +6,27 @@ Ejemplos::
     python main.py usuario agregar ana --nombre "Ana López"
     python main.py asgard registrar aula-1 --nombre "Aula 1" --ubicacion "Edificio A"
     python main.py permiso otorgar ana aula-1
+    python main.py cliente --servidor bifrost.midominio.com --tls --salida servidor.json
     python main.py sesiones
+    python main.py estado          # ¿está en ejecución?
+    python main.py monitor         # vista en vivo (útil si corre como servicio)
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import socket
 import sys
 from pathlib import Path
 
 from .base_datos import Database, DatabaseError
-from .protocolo import format_fingerprint, local_ipv4_addresses
+from .protocolo import DEFAULT_PORT, format_fingerprint, local_ipv4_addresses
 from .seguridad import certificate_file_fingerprint, generate_self_signed
 
-ADMIN_COMMANDS = ("usuario", "asgard", "permiso", "sesiones", "huella", "certificado")
+ADMIN_COMMANDS = ("usuario", "asgard", "permiso", "sesiones", "huella", "certificado", "cliente", "estado", "monitor")
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -32,6 +36,14 @@ def default_data_dir() -> Path:
 
 def database_path(data_dir: Path) -> Path:
     return data_dir / "bifrost.db"
+
+
+def status_path(data_dir: Path) -> Path:
+    return data_dir / "estado.json"
+
+
+def log_path(data_dir: Path) -> Path:
+    return data_dir / "bifrost.log"
 
 
 def tls_paths(data_dir: Path) -> tuple[Path, Path]:
@@ -164,12 +176,75 @@ def build_parser() -> argparse.ArgumentParser:
     p = commands.add_parser("certificado", parents=[common], help="genera el certificado TLS autofirmado")
     p.add_argument("--nombre-publico", default="", help="dominios o IP separados por comas")
     p.add_argument("--forzar", action="store_true", help="reemplaza el certificado existente")
+
+    p = commands.add_parser(
+        "cliente", parents=[common],
+        help="crea servidor.json: el servidor predeterminado de Midgard (los usuarios no escriben nada)",
+    )
+    p.add_argument("--servidor", required=True, help="dominio o IP de Bifröst, con :puerto si no es 8765")
+    p.add_argument("--tls", action="store_true", help="Bifröst usa TLS (modo público)")
+    p.add_argument("--cert", type=Path, help="certificado del servidor (por defecto el autofirmado de datos/tls)")
+    p.add_argument("--sin-huella", action="store_true",
+                   help="no fijar la huella (certificados de Let's Encrypt u otra autoridad, que se renuevan)")
+    p.add_argument("--nombre", default="", help="nombre del servidor que verán los usuarios")
+    p.add_argument("--salida", type=Path, help="archivo a escribir (por defecto se muestra en pantalla)")
+
+    commands.add_parser("estado", parents=[common], help="indica si Bifröst está en ejecución y con qué conexiones")
+    commands.add_parser("monitor", parents=[common], help="vista en vivo del servidor (estado y registro)")
     return parser
+
+
+def parse_server(text: str) -> tuple[str, int]:
+    """'host', 'host:puerto' o '[ipv6]:puerto'."""
+    value = text.strip()
+    if value.startswith("["):
+        host, _, rest = value[1:].partition("]")
+        return host, int(rest[1:]) if rest.startswith(":") else DEFAULT_PORT
+    if value.count(":") == 1:
+        host, port = value.split(":")
+        return host, int(port)
+    return value, DEFAULT_PORT
+
+
+def client_file(args: argparse.Namespace) -> int:
+    """Archivo de conexión para Midgard: con él, el usuario solo escribe su usuario y contraseña."""
+    try:
+        host, port = parse_server(args.servidor)
+    except ValueError:
+        print("Error: el puerto de --servidor debe ser un número.", file=sys.stderr)
+        return 1
+    data: dict[str, object] = {"servidor": host, "puerto": port, "tls": bool(args.tls)}
+    if args.tls and not args.sin_huella:
+        cert = args.cert or tls_paths(args.datos)[0]
+        if not cert.exists():
+            print(f"Error: no existe {cert}. Inicia Bifröst en modo público una vez (crea el certificado) "
+                  "o usa --sin-huella si el certificado es de Let's Encrypt.", file=sys.stderr)
+            return 1
+        data["huella"] = format_fingerprint(certificate_file_fingerprint(cert))
+    if args.nombre:
+        data["nombre"] = args.nombre
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    if not args.salida:
+        print(text)
+        return 0
+    args.salida.write_text(text + "\n", encoding="utf-8")
+    print(f"Archivo de conexión creado: {args.salida}")
+    print("Cópialo junto al instalador de Midgard (Midgard/Software/servidor.json) antes de instalar o de")
+    print("construir el ejecutable: Midgard se conectará solo a este servidor.")
+    return 0
 
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     data_dir: Path = args.datos
+    if args.command in ("estado", "monitor"):
+        from .consola import monitor, mostrar_estado
+
+        if args.command == "estado":
+            return mostrar_estado(status_path(data_dir))
+        return monitor(status_path(data_dir), log_path(data_dir))
+    if args.command == "cliente":
+        return client_file(args)
     try:
         if args.command == "huella":
             cert = args.cert or tls_paths(data_dir)[0]
@@ -216,6 +291,8 @@ def _users(db: Database, args: argparse.Namespace) -> int:
         print(f"Usuario '{user.username}' creado ({role}).")
         if not user.is_admin:
             print(f"Dale acceso con: python main.py permiso otorgar {user.username} <asgard|*>")
+        print("Midgard se conecta solo a este servidor en la red local; para Internet entrega a los usuarios")
+        print("un Midgard con servidor.json (python main.py cliente --servidor <dominio> --tls --salida servidor.json).")
     elif args.action == "listar":
         rows = []
         for user in db.list_users():

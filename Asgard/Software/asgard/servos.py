@@ -200,6 +200,11 @@ class PanTilt:
         with self._lock:
             return abs(self._target_pan - self._pan) > 0.05 or abs(self._target_tilt - self._tilt) > 0.05
 
+    @property
+    def attached(self) -> bool:
+        """Falso cuando los servos están sueltos (sin pulsos) en reposo."""
+        return self._attached
+
     def release_when_still(self) -> None:
         """Deja de enviar pulsos al llegar al objetivo (evita temblor y consumo)."""
         with self._lock:

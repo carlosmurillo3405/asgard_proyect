@@ -2,13 +2,24 @@
 # Instalador de Midgard para Windows 10/11
 #
 # Uso: doble clic en instalar_windows.bat, o desde PowerShell:
-#   powershell -ExecutionPolicy Bypass -File instalar_windows.ps1 [-SinAccesoDirecto] [-Ejecutable]
+#   powershell -ExecutionPolicy Bypass -File instalar_windows.ps1 [opciones]
+#
+# Opciones:
+#   -Servidor host[:puerto]   servidor predeterminado (crea servidor.json; los usuarios no escriben nada)
+#   -Tls                      el servidor usa TLS (modo público)
+#   -Huella AB:CD:...         huella del certificado autofirmado de Bifröst
+#   -SinAccesoDirecto         no crea accesos directos
+#   -Ejecutable               además genera dist\Midgard\Midgard.exe
 #
 # Crea el entorno virtual .venv junto al programa, instala las dependencias,
 # comprueba que todo cargue y crea accesos directos en el Escritorio y en el
-# menú Inicio. Con -Ejecutable además genera dist\Midgard\Midgard.exe.
+# menú Inicio. Si junto al instalador hay un servidor.json (creado en Bifröst
+# con 'main.py cliente'), Midgard se conecta solo a ese servidor.
 # =============================================================================
 param(
+    [string]$Servidor = "",
+    [switch]$Tls,
+    [string]$Huella = "",
     [switch]$SinAccesoDirecto,
     [switch]$Ejecutable
 )
@@ -25,7 +36,7 @@ function Fallo([string]$Texto) {
 }
 
 function Buscar-Python {
-    # Devuelve el comando (ejecutable y argumentos) de un Python 3.10+ con Tkinter.
+    # Devuelve el comando (ejecutable y argumentos) de un Python 3.10+ de 64 bits.
     $candidatos = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($version in @("3.13", "3.12", "3.14", "3.11", "3.10")) {
@@ -39,7 +50,7 @@ function Buscar-Python {
         $exe = $candidato[0]
         $extra = @($candidato | Select-Object -Skip 1)
         try {
-            $salida = & $exe @extra -c "import sys, tkinter; print(sys.version_info >= (3, 10))" 2>$null
+            $salida = & $exe @extra -c "import sys; print(sys.version_info >= (3, 10) and sys.maxsize > 2**32)" 2>$null
             if ($LASTEXITCODE -eq 0 -and "$salida" -match "True") {
                 return , $candidato
             }
@@ -51,13 +62,13 @@ function Buscar-Python {
 }
 
 if ($Dir.Length -gt 140) {
-    Aviso "La carpeta tiene una ruta muy larga ($($Dir.Length) caracteres). Windows limita las rutas a 260 caracteres y algunas bibliotecas (como PortAudio) podrían no cargar. Si la instalación falla, mueve la carpeta a una ruta corta, por ejemplo C:\Midgard."
+    Aviso "La carpeta tiene una ruta muy larga ($($Dir.Length) caracteres). Windows limita las rutas a 260 caracteres y algunas bibliotecas (como PortAudio o Qt) podrían no cargar. Si la instalación falla, mueve la carpeta a una ruta corta, por ejemplo C:\Midgard."
 }
 
-Info "Buscando Python 3.10 o superior"
+Info "Buscando Python 3.10 o superior (64 bits)"
 $python = Buscar-Python
 if ($null -eq $python) {
-    Aviso "No se encontró Python 3.10+ con Tkinter."
+    Aviso "No se encontró Python 3.10+ de 64 bits."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         $respuesta = Read-Host "¿Instalar Python 3.12 con winget ahora? (S/N)"
         if ($respuesta -match "^[sSyY]") {
@@ -82,14 +93,31 @@ if (-not (Test-Path $venvPython)) {
     if ($LASTEXITCODE -ne 0) { Fallo "No se pudo crear el entorno virtual." }
 }
 
-Info "Instalando dependencias (puede tardar unos minutos)"
+Info "Instalando dependencias (incluye la interfaz Qt; puede tardar unos minutos)"
 & $venvPython -m pip install --quiet --upgrade pip
 & $venvPython -m pip install --quiet -r (Join-Path $Dir "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Fallo "No se pudieron instalar las dependencias." }
 
 Info "Comprobando la instalación"
-& $venvPython -c "import cv2, numpy, PIL.ImageTk, sounddevice, mss, cryptography, tkinter; print('Dependencias correctas')"
+& $venvPython -c "import cv2, numpy, PIL.Image, sounddevice, mss, cryptography; from PySide6 import QtWidgets; print('Dependencias correctas')"
 if ($LASTEXITCODE -ne 0) { Fallo "Alguna dependencia no carga; revisa los mensajes anteriores. Si el error menciona 0xce o 'too long', mueve la carpeta a una ruta más corta (por ejemplo C:\Midgard) y vuelve a instalar." }
+
+if ($Servidor) {
+    Info "Fijando el servidor predeterminado: $Servidor"
+    $tlsTexto = if ($Tls -or $Huella) { "True" } else { "False" }
+    & $venvPython -c "import sys; from midgard.recursos import escribir_servidor; argumentos = sys.argv + ['', '']; print(escribir_servidor(argumentos[1], argumentos[2] == 'True', argumentos[3]))" $Servidor $tlsTexto $Huella
+    if ($LASTEXITCODE -ne 0) { Fallo "El servidor indicado no es válido (usa host o host:puerto)." }
+}
+$archivoServidor = Join-Path $Dir "servidor.json"
+if (Test-Path $archivoServidor) {
+    Info "Servidor predeterminado: $archivoServidor (los usuarios solo escriben usuario y contraseña)"
+} else {
+    Aviso "Sin servidor.json: Midgard buscará Bifröst en la red local. Para un servidor en Internet usa -Servidor o copia aquí el servidor.json creado en Bifröst ('main.py cliente')."
+}
+
+$icono = Join-Path $Dir "midgard.ico"
+& $venvPython -c "import sys; from midgard.recursos import guardar_icono; guardar_icono(sys.argv[1])" $icono 2>$null
+if ($LASTEXITCODE -ne 0) { Aviso "No se pudo crear el icono; se usará el de Python." }
 
 $lanzador = Join-Path $Dir "iniciar_midgard.bat"
 @"
@@ -112,7 +140,7 @@ if (-not $SinAccesoDirecto) {
         $acceso.TargetPath = $pythonw
         $acceso.Arguments = '"' + (Join-Path $Dir "main.py") + '"'
         $acceso.WorkingDirectory = $Dir
-        $acceso.IconLocation = "$pythonw,0"
+        $acceso.IconLocation = if (Test-Path $icono) { "$icono,0" } else { "$pythonw,0" }
         $acceso.Description = "Midgard - cliente del sistema Asgard"
         $acceso.Save()
     }

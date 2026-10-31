@@ -81,6 +81,21 @@ class RecordingScreen(HeadlessScreen):
         self.chat: list[tuple[str, str]] = []
         self.hand = False
         self.streams: tuple[bool, bool, bool] | None = None
+        self.user: tuple[str, str] | None = None
+        self.avatar: bytes | None = None
+        self.title: tuple[str, str] | None = None
+
+    def set_title(self, name: str, location: str = "") -> None:
+        self.title = (name, location)
+
+    def show_session(self, user: str, login: str = "") -> None:
+        self.user = (user, login)
+
+    def show_idle(self) -> None:
+        self.user = None
+
+    def set_avatar(self, data: bytes | None) -> None:
+        self.avatar = data
 
     def submit_frame(self, stream: str, data: bytes) -> None:
         self.frames[stream] = self.frames.get(stream, 0) + 1
@@ -162,12 +177,18 @@ class SystemTest(unittest.TestCase):
         def available() -> bool:
             return any(i["id"] == "aula-1" and i["status"] == "disponible" for i in self.midgard.asgards)
 
+        # Primero el usuario inicia sesión; después elige el Asgard.
+        self.midgard.authenticate("ana", PASSWORD)
+        user, resumed = self.event("auth_ok")
+        self.assertEqual((user["display"], resumed), ("Ana López", False))
         self.assertTrue(wait_until(available), "El Asgard no apareció como disponible")
-        self.assertTrue(self.midgard.login("aula-1", "ana", PASSWORD))
+        self.assertTrue(self.midgard.open_asgard("aula-1"))
         info, resumed = self.event("session")
         self.assertFalse(resumed)
         self.assertEqual(info["session"]["asgard"]["name"], "Aula 1")
         self.assertTrue(wait_until(lambda: self.asgard.active))
+        self.assertEqual(self.screen.user, ("Ana López", "ana"))
+        self.assertEqual(self.screen.title, ("Aula 1", "Edificio A"))
 
     def test_session_streams_and_commands(self) -> None:
         self.start_session()
@@ -223,11 +244,44 @@ class SystemTest(unittest.TestCase):
         self.midgard.save_preset("pizarrón")
         self.assertTrue(wait_until(lambda: "pizarrón" in self.asgard.store.presets))
 
-        # Cerrar la sesión devuelve el Asgard a reposo.
-        self.midgard.logout()
-        self.assertIn("cerrada", self.event("session_end")[0])
+        # Terminar la llamada devuelve el Asgard a reposo; el usuario sigue con su sesión iniciada.
+        self.midgard.close_session()
+        self.assertIn("terminada", self.event("session_end")[0])
         self.assertTrue(wait_until(lambda: not self.asgard.active and not self.asgard.hand.raised))
         self.assertTrue(wait_until(lambda: self.asgard.camera is None), "La cámara siguió abierta en reposo")
+        self.assertTrue(self.midgard.authenticated)
+        self.assertTrue(wait_until(lambda: any(i["status"] == "disponible" for i in self.midgard.asgards)))
+
+    def test_developer_view_avatar_and_sign_out(self) -> None:
+        self.start_session()
+        # Vista de desarrollador: llegan puntos del cuerpo, punto de mira y datos de los servos.
+        self.midgard.set_debug(True)
+        self.midgard.set_camera_mode("auto")
+
+        def skeleton() -> bool:
+            items = self.midgard.detections.get("items", [])
+            return bool(items) and all(len(item.get("pts", [])) == 13 for item in items) and bool(self.midgard.detections.get("aim"))
+
+        self.assertTrue(wait_until(skeleton, timeout=10), "No llegaron los puntos del cuerpo ni el punto de mira")
+        servo = self.event("state")[0].get("servo") or {}
+        self.assertIn("target_pan", servo)
+        self.assertTrue(wait_until(lambda: len(self.midgard.trails) > 0))
+        self.midgard.set_tracking(deadzone=2.5, aim_y=0.4)
+        self.assertTrue(wait_until(lambda: self.asgard.director.params.deadzone == 2.5))
+        self.assertEqual(self.asgard.store.data["tracking"]["aim_y"], 0.4)
+
+        # La foto de perfil llega a la pantalla del aula y se puede quitar.
+        foto = b"\xff\xd8" + b"\x00" * 200 + b"\xff\xd9"
+        self.midgard.set_avatar(foto)
+        self.assertTrue(wait_until(lambda: self.screen.avatar == foto))
+        self.midgard.set_avatar(b"")
+        self.assertTrue(wait_until(lambda: self.screen.avatar is None))
+
+        # Cerrar sesión termina la llamada y el servidor olvida al usuario.
+        self.midgard.sign_out()
+        self.event("signed_out")
+        self.assertTrue(wait_until(lambda: not self.asgard.active))
+        self.assertFalse(self.midgard.authenticated)
 
     def test_audio_flows_both_ways(self) -> None:
         self.start_session()
@@ -367,8 +421,10 @@ class TlsSystemTest(unittest.TestCase):
         self.asgard = AsgardApp(load_config(config_path), simulate=True, screen=RecordingScreen(), use_audio_devices=False)
         self.asgard.start()
         midgard = self.controller(TlsSettings(enabled=True, fingerprint=self.fingerprint))
+        midgard.authenticate("ana", PASSWORD)
+        self.first_event(midgard, ("auth_ok",))
         self.assertTrue(wait_until(lambda: any(i["status"] == "disponible" for i in midgard.asgards)))
-        self.assertTrue(midgard.login("aula-1", "ana", PASSWORD))
+        self.assertTrue(midgard.open_asgard("aula-1"))
         self.first_event(midgard, ("session",))
         self.assertTrue(wait_until(lambda: midgard.take_remote_frame(320, 180) is not None), "No llegó video por TLS")
         self.assertTrue(wait_until(lambda: midgard.audio is not None and midgard.audio.transport == "UDP"))

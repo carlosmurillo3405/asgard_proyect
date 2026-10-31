@@ -1,0 +1,2 @@
+# Pantalla del aula: solo si el sistema no trae PyQt6/PyQt5 (instalar.sh usa primero los de apt).
+PySide6-Essentials>=6.6

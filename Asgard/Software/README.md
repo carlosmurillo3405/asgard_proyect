@@ -10,6 +10,21 @@ Asgard es el equipo que está en el aula. Funciona solo, sin que nadie lo opere:
 - No comparte pantalla; solo recibe la de Midgard.
 - Al terminar la sesión vuelve a reposo: apaga cámara y micrófono, baja la mano y estaciona los servos.
 
+## Pantalla del aula
+
+La pantalla sigue la plantilla de diseño «UI-Asgard» (tema oscuro, Inter, logotipo y runas), se adapta a cualquier tamaño y orientación (monitor, televisión 4K, proyector o pantalla vertical) y anima todos sus cambios. Está hecha con Qt: PyQt6 o PyQt5 de Raspberry Pi OS, o PySide6.
+
+- **Reposo** (esperando una conexión): el logotipo «respira» sobre el patrón de runas, con el nombre y la ubicación del Asgard, «Esperando la conexión de un usuario…» y el estado del enlace con Bifröst (conectado, buscando el servidor o sin conexión). Abajo, la hora.
+- **Sesión** (pantalla completa, al conectarse un usuario):
+  - **Usuario**: nombre (y `@usuario`), foto de perfil si la puso en Midgard, y su **estado** (Conectado / Reconectando…) junto con indicadores de **pantalla compartida**, micrófono y cámara.
+  - **Pantalla compartida**: la pantalla del usuario en grande cuando la comparte (con su cámara en miniatura); si solo envía su cámara, se muestra la cámara; si no comparte nada, lo indica.
+  - **Mano**: «Mano abajo» o «Mano levantada · desde las 10:32»; al levantarse, la tarjeta se ilumina y el icono late.
+  - **Mensajes**: los mensajes que envía desde Midgard, con hora; cada uno entra con un fundido y la tarjeta destella.
+  - Arriba: duración de la sesión y hora. Avisos breves cuando el usuario se conecta, pierde la conexión, etc.
+- Con `[pantalla] diagnostico = si` aparece al pie una línea técnica (modo de cámara, pan/tilt, IA, audio y video).
+
+Atajos: **F11** alterna la pantalla completa y **Ctrl+Q** cierra. En pantalla completa el puntero se oculta.
+
 ## Hardware
 
 | Componente | Recomendado | Notas |
@@ -54,7 +69,7 @@ Asgard es el equipo que está en el aula. Funciona solo, sin que nadie lo opere:
    ```
 3. Reinicia la Raspberry para aplicar los permisos de grupo (gpio, i2c, video…). Asgard arrancará solo.
 
-El instalador instala los paquetes del sistema y crea `.venv`. El entorno ve los paquetes de apt (`gpiozero`, `lgpio`, `picamera2`) e instala OpenCV, NumPy, Pillow, sounddevice, cryptography y MediaPipe. Si el sistema trae numpy 1.x, fija `numpy<2` para no romper picamera2. Después crea `asgard.ini`, descarga los modelos de IA, configura el arranque automático y ejecuta una comprobación final.
+El instalador instala los paquetes del sistema y crea `.venv`. El entorno ve los paquetes de apt (`gpiozero`, `lgpio`, `picamera2` y la interfaz **`python3-pyqt6`**, o `python3-pyqt5` en sistemas antiguos) e instala OpenCV, NumPy, Pillow, sounddevice, cryptography y MediaPipe. Si el sistema no tiene PyQt, intenta PySide6 con pip (`requirements-pantalla.txt`); sin ninguno, Asgard funciona sin pantalla. Si el sistema trae numpy 1.x, fija `numpy<2` para no romper picamera2. Después crea `asgard.ini`, descarga los modelos de IA, configura el arranque automático y ejecuta una comprobación final.
 
 | Opción | Descripción |
 | --- | --- |
@@ -86,7 +101,7 @@ El archivo está comentado. Se edita a mano, o con `python main.py --configurar 
 | `[servos]` | `controlador`, `pin_pan`, `pin_tilt`, `canal_pan`, `canal_tilt`, límites `pan_min/max` y `tilt_min/max`, `reposo_pan/tilt`, pulsos, `velocidad_max`, `invertir_pan/tilt`, `soltar_en_reposo` |
 | `[mano]` | `tipo`, `controlador`, `pin`, `canal`, `angulo_reposo`, `angulo_levantada`, `bajar_automatico_s`, `activo_alto` |
 | `[ia]` | `activada`, `modelo`, `max_personas`, `confianza_min`, `visibilidad_min`, `ancho_analisis`, `frecuencia_max`, `punto_mira` |
-| `[pantalla]` | `modo` (`completa`, `ventana` o `ninguna`), `tamano_chat` |
+| `[pantalla]` | `modo` (`completa`, `ventana` o `ninguna`), `tamano_chat`, `diagnostico` |
 
 El audio siempre se emite en máxima calidad: PCM de 16 bits a 48 kHz, en estéreo si el micrófono lo permite. Las posiciones guardadas desde Midgard y los ajustes de seguimiento se guardan en `estado_asgard.json`.
 
@@ -103,7 +118,7 @@ El audio siempre se emite en máxima calidad: PCM de 16 bits a 48 kHz, en estér
 ```
 
 - Registros: `registros/asgard.log`. En modo servicio, también `journalctl --user -u asgard -f`.
-- Atajos en la pantalla del aula: **F11** alterna la pantalla completa y **Ctrl+Q** cierra.
+- Sin sesión gráfica (`DISPLAY`/`WAYLAND_DISPLAY`) o sin Qt, Asgard sigue funcionando sin pantalla y lo anota en el registro.
 
 ## Funciones en detalle
 
@@ -126,9 +141,11 @@ Usa MediaPipe Pose Landmarker sobre una copia reducida del cuadro (`ancho_analis
 
 Si MediaPipe no está disponible, Asgard funciona igual, solo con control manual, y Midgard lo indica.
 
+Cuando Midgard está en su **vista de desarrollador**, Asgard agrega a las detecciones los puntos del cuerpo (esqueleto) y el punto de mira, y a su estado los datos de los servos (posición objetivo, en movimiento, con pulsos o sueltos, velocidad). Desde esa vista también se ajustan la zona muerta y el punto de mira, que se guardan en `estado_asgard.json`.
+
 **Mano**
 
-Se levanta y se baja desde Midgard. Suena un aviso y aparece «MANO LEVANTADA» en la pantalla del aula. Con `bajar_automatico_s` se baja sola pasado ese tiempo.
+Se levanta y se baja desde Midgard. Suena un aviso y la tarjeta «Mano levantada» se ilumina en la pantalla del aula. Con `bajar_automatico_s` se baja sola pasado ese tiempo.
 
 **Red**
 
@@ -161,6 +178,8 @@ La simulación usa una cámara virtual con dos personas que caminan y responde a
 | «IA no disponible» | Sistema de 32 bits o sin wheel de MediaPipe para esta versión de Python: usa Raspberry Pi OS de 64 bits. |
 | No hay audio | Usa `--listar-audio` y pon el dispositivo en `[audio] entrada/salida`. Si se entrecorta, prueba `latencia = high`. |
 | La cámara CSI falla con un error de numpy | Reinstala con `./instalar.sh` para que fije `numpy<2` en el entorno. |
+| «No está instalada la biblioteca Qt» y no aparece la pantalla | `sudo apt install python3-pyqt6` (o `python3-pyqt5`) y vuelve a ejecutar `./instalar.sh`. |
+| «Versión de protocolo incompatible» | Actualiza Asgard, Midgard y Bifröst a la misma versión. |
 
 ## Pruebas (desarrollo)
 
@@ -168,4 +187,4 @@ La simulación usa una cámara virtual con dos personas que caminan y responde a
 python -m unittest discover -s tests -t .
 ```
 
-`protocolo.py`, `red_cliente.py`, `audio.py` e `imagen.py` son copias de `Comun/`: edítalos allí y ejecuta `python Comun/sincronizar.py`.
+La prueba de la pantalla del aula usa Qt en modo `offscreen` (no abre ventanas). Los módulos compartidos (`protocolo.py`, `red_cliente.py`, `audio.py`, `imagen.py`, `qt.py`, `tema.py`, `iconos.py`, `componentes.py` y la carpeta `fuentes/`) son copias de `Comun/`: edítalos allí y ejecuta `python Comun/sincronizar.py`. La pantalla del aula está en `asgard/pantalla_aula.py`; `asgard/pantalla.py` define la versión sin monitor.

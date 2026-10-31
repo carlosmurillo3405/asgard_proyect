@@ -32,8 +32,14 @@ def default_path() -> Path:
     return config_dir() / "ajustes.json"
 
 
+VIEW_DEFAULT = "predeterminada"
+VIEW_ADVANCED = "avanzada"
+
+
 @dataclass
 class Settings:
+    # Servidor: "auto" usa servidor.json o la red local; "manual" usa host/port/tls (modo avanzado).
+    server_mode: str = "auto"
     host: str = ""
     port: int = 8765
     tls: bool = False
@@ -41,6 +47,7 @@ class Settings:
     username: str = ""
     last_asgard: str = ""
     trusted_fingerprints: dict[str, str] = field(default_factory=dict)
+    avatars: dict[str, str] = field(default_factory=dict)   # usuario -> foto (en la carpeta de ajustes)
     microphone: str = ""
     speaker: str = ""
     camera: int = -1
@@ -51,7 +58,15 @@ class Settings:
     speaker_on: bool = True
     receive_video: bool = True
     receive_audio: bool = True
-    click_mode: str = "persona"
+    # Interfaz
+    view_mode: str = VIEW_DEFAULT
+    side_panel: str = "chat"
+    side_open: bool = True
+    show_boxes: bool = True
+    show_trails: bool = True
+    show_skeleton: bool = True
+    show_hud: bool = True
+    show_grid: bool = False
     geometry: str = ""
 
     def trusted_fingerprint(self, host: str, port: int) -> str:
@@ -59,6 +74,17 @@ class Settings:
 
     def trust(self, host: str, port: int, fingerprint: str) -> None:
         self.trusted_fingerprints[f"{host}:{port}"] = fingerprint
+
+    @property
+    def advanced(self) -> bool:
+        return self.view_mode == VIEW_ADVANCED
+
+    def avatar_path(self, username: str) -> Path | None:
+        name = self.avatars.get(username.lower())
+        if not name:
+            return None
+        path = config_dir() / "fotos" / name
+        return path if path.is_file() else None
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -88,6 +114,10 @@ def load_settings(path: Path | None = None) -> Settings:
             ok = isinstance(value, str)
         if ok:
             setattr(settings, item.name, value)
+    if settings.server_mode not in ("auto", "manual"):
+        settings.server_mode = "auto"
+    if settings.view_mode not in (VIEW_DEFAULT, VIEW_ADVANCED):
+        settings.view_mode = VIEW_DEFAULT
     return settings
 
 

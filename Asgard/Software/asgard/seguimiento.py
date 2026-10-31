@@ -370,7 +370,24 @@ class TrackingParams:
         return {
             "sensitivity": round(self.sensitivity, 3), "speed": round(self.speed, 1),
             "invert_pan": self.invert_pan, "invert_tilt": self.invert_tilt,
+            "deadzone": round(self.deadzone, 2), "max_step": round(self.max_step, 1), "aim_y": round(self.aim_y, 3),
         }
+
+
+# Puntos del cuerpo que se envían a la vista de desarrollador de Midgard (índices de MediaPipe Pose):
+# nariz, hombros, codos, muñecas, caderas, rodillas y tobillos.
+KEYPOINTS = (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+
+
+def keypoints(pose: BodyPose, min_visibility: float = 0.35) -> list[list[float] | None]:
+    """Puntos clave normalizados ([x, y] o None si no se ven) para dibujar el esqueleto."""
+    if len(pose.landmarks) < 33:
+        return []
+    result: list[list[float] | None] = []
+    for index in KEYPOINTS:
+        x, y, visibility = pose.landmarks[index]
+        result.append([round(x, 3), round(y, 3)] if visibility >= min_visibility else None)
+    return result
 
 
 MODE_MANUAL = "manual"
@@ -567,17 +584,26 @@ class CameraDirector:
         with self._lock:
             return {"mode": self.mode, "target": self.target_id, "target_state": self.target_state}
 
-    def detections_message(self) -> dict[str, Any]:
+    def detections_message(self, points: bool = False) -> dict[str, Any]:
+        """Personas detectadas; con ``points`` incluye el esqueleto (vista de desarrollador)."""
         with self._lock:
+            items = []
+            aim = None
+            for t in self.tracks:
+                item: dict[str, Any] = {"id": t.id, "box": [round(v, 4) for v in t.box], "target": t.id == self.target_id}
+                if points:
+                    item["pts"] = keypoints(t.pose)
+                if t.id == self.target_id and self.mode != MODE_MANUAL:
+                    x, y, w, h = t.box
+                    aim = [round(x + w / 2, 4), round(y + h * self.params.aim_y, 4)]
+                items.append(item)
             return {
                 "op": "evt",
                 "evt": "detections",
-                "items": [
-                    {"id": t.id, "box": [round(v, 4) for v in t.box], "target": t.id == self.target_id}
-                    for t in self.tracks
-                ],
+                "items": items,
                 "mode": self.mode,
                 "target": self.target_id,
+                "aim": aim,
             }
 
     def reset(self) -> None:

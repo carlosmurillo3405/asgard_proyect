@@ -18,21 +18,32 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 COMUN = RAIZ / "Comun"
 
-# Módulo compartido -> paquetes que lo usan.
+_CLIENTES = ["Asgard/Software/asgard", "Midgard/Software/midgard"]
+
+# Módulo (o carpeta) compartido -> paquetes que lo usan.
 DESTINOS: dict[str, list[str]] = {
-    "protocolo.py": ["Asgard/Software/asgard", "Midgard/Software/midgard", "Bifröst/bifrost"],
-    "red_cliente.py": ["Asgard/Software/asgard", "Midgard/Software/midgard"],
-    "audio.py": ["Asgard/Software/asgard", "Midgard/Software/midgard"],
-    "imagen.py": ["Asgard/Software/asgard", "Midgard/Software/midgard"],
+    "protocolo.py": [*_CLIENTES, "Bifröst/bifrost"],
+    "red_cliente.py": _CLIENTES,
+    "audio.py": _CLIENTES,
+    "imagen.py": _CLIENTES,
+    # Interfaz gráfica (plantilla UI-Asgard): Qt, tema, iconos, componentes y tipografías.
+    "qt.py": _CLIENTES,
+    "tema.py": _CLIENTES,
+    "iconos.py": _CLIENTES,
+    "componentes.py": _CLIENTES,
+    "fuentes": _CLIENTES,
 }
 
 
 def pares() -> list[tuple[Path, Path]]:
-    return [
-        (COMUN / modulo, RAIZ / destino / modulo)
-        for modulo, destinos in DESTINOS.items()
-        for destino in destinos
-    ]
+    resultado = []
+    for modulo, destinos in DESTINOS.items():
+        origen = COMUN / modulo
+        archivos = sorted(p for p in origen.rglob("*") if p.is_file()) if origen.is_dir() else [origen]
+        for destino in destinos:
+            for archivo in archivos:
+                resultado.append((archivo, RAIZ / destino / archivo.relative_to(COMUN)))
+    return resultado
 
 
 def desactualizados() -> list[tuple[Path, Path]]:

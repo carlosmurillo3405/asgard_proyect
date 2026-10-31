@@ -171,11 +171,13 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
         packet = await client.recv()
         return client, packet
 
-    async def midgard(self, resume: str | None = None):
+    async def midgard(self, resume: str | None = None, token: str | None = None):
         client = await self.open()
         hello = {"role": "midgard", "version": PROTOCOL_VERSION}
         if resume:
             hello["resume"] = resume
+        if token:
+            hello["token"] = token
         await client.send(HELLO, hello)
         packet = await client.recv()
         self.assertEqual(packet.type, WELCOME)
@@ -188,16 +190,30 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(packet.type, WELCOME)
         return client
 
-    async def login(self, client: RawClient, user: str = "ana", password: str = PASSWORD_ANA,
-                    asgard: str = "aula-1") -> dict:
-        await client.control({"op": "login", "asgard": asgard, "user": user, "password": password})
-
-        async def answer():
+    @staticmethod
+    async def answer(client: RawClient, ops: tuple[str, ...], timeout: float = 5.0) -> dict:
+        async def find():
             while True:
                 packet = await read_packet(client.reader)
-                if packet.type == CONTROL and packet.meta.get("op") in ("login_ok", "login_error"):
+                if packet.type == CONTROL and packet.meta.get("op") in ops:
                     return packet.meta
-        return await asyncio.wait_for(answer(), 5)
+        return await asyncio.wait_for(find(), timeout)
+
+    async def auth(self, client: RawClient, user: str = "ana", password: str = PASSWORD_ANA) -> dict:
+        await client.control({"op": "auth", "user": user, "password": password})
+        return await self.answer(client, ("auth_ok", "auth_error"))
+
+    async def open_call(self, client: RawClient, asgard: str = "aula-1") -> dict:
+        await client.control({"op": "open", "asgard": asgard})
+        return await self.answer(client, ("session_ok", "session_error"))
+
+    async def login(self, client: RawClient, user: str = "ana", password: str = PASSWORD_ANA,
+                    asgard: str = "aula-1") -> dict:
+        """Inicia sesión y abre la llamada; devuelve la primera respuesta de error o session_ok."""
+        result = await self.auth(client, user, password)
+        if result["op"] != "auth_ok":
+            return result
+        return await self.open_call(client, asgard)
 
     async def session(self):
         """Asgard y Midgard conectados con una sesión activa de 'ana'."""
@@ -205,7 +221,7 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(welcome_a.type, WELCOME)
         midgard, welcome_m = await self.midgard()
         result = await self.login(midgard)
-        self.assertEqual(result["op"], "login_ok", result)
+        self.assertEqual(result["op"], "session_ok", result)
         start = await asgard.recv_op("session_start")
         self.assertEqual(start["user"]["display"], "Ana López")
         return asgard, welcome_a.meta, midgard, welcome_m, result
@@ -237,20 +253,68 @@ class AuthenticationTests(ServerTestCase):
         self.assertEqual((await self.login(midgard, user="nadie"))["code"], "credentials")
         self.assertEqual((await self.login(midgard, asgard="aula-2"))["code"], "permission")
         self.db.grant("ana", "aula-2")
-        self.assertEqual((await self.login(midgard, asgard="aula-2"))["code"], "offline")
+        self.assertEqual((await self.open_call(midgard, "aula-2"))["code"], "offline")
+
+    async def test_nothing_is_allowed_before_signing_in(self) -> None:
+        await self.asgard()
+        midgard, welcome = await self.midgard()
+        self.assertIsNone(welcome["auth"])
+        for request in ({"op": "list"}, {"op": "open", "asgard": "aula-1"}, {"op": "cmd", "cmd": "hand"}):
+            await midgard.control(request)
+            self.assertEqual((await midgard.recv_op("error"))["code"], "auth_required")
 
     async def test_repeated_failures_are_throttled(self) -> None:
         midgard, _ = await self.midgard()
-        codes = [(await self.login(midgard, password=f"falla-{i}"))["code"] for i in range(11)]
+        codes = [(await self.auth(midgard, password=f"falla-{i}"))["code"] for i in range(11)]
         self.assertEqual(codes[-1], "throttled")
         self.assertIn("credentials", codes)
 
+    async def test_token_restores_the_user_after_reconnecting(self) -> None:
+        midgard, _ = await self.midgard()
+        result = await self.auth(midgard)
+        self.assertEqual((result["op"], result["user"]["display"]), ("auth_ok", "Ana López"))
+        await midgard.close()
+        again, welcome = await self.midgard(token=result["token"])
+        self.assertEqual(welcome["auth"]["name"], "ana")
+        self.assertIn("aula-1", {i["id"] for i in (await again.recv_op("asgards"))["items"]})
+        _, expired = await self.midgard(token="token-inventado")
+        self.assertIsNone(expired["auth"])
+        # Un usuario desactivado pierde el acceso aunque tenga token.
+        self.db.set_user_flags("ana", active=False)
+        _, blocked = await self.midgard(token=result["token"])
+        self.assertIsNone(blocked["auth"])
+
+    async def test_signout_ends_the_call_and_forgets_the_user(self) -> None:
+        asgard, _, midgard, _, _ = await self.session()
+        await midgard.control({"op": "signout"})
+        self.assertEqual((await asgard.recv_op("session_end"))["reason"], "logout")
+        await midgard.recv_op("signed_out")
+        await midgard.control({"op": "list"})
+        self.assertEqual((await midgard.recv_op("error"))["code"], "auth_required")
+
+    async def test_password_change_and_history(self) -> None:
+        asgard, _, midgard, _, _ = await self.session()
+        await midgard.control({"op": "logout"})
+        await asgard.recv_op("session_end")
+        await midgard.control({"op": "password", "old": "incorrecta", "new": "clave-nueva-789"})
+        self.assertIn("actual", (await midgard.recv_op("password_error"))["message"])
+        await midgard.control({"op": "password", "old": PASSWORD_ANA, "new": "corta"})
+        self.assertIn("8", (await midgard.recv_op("password_error"))["message"])
+        await midgard.control({"op": "password", "old": PASSWORD_ANA, "new": "clave-nueva-789"})
+        await midgard.recv_op("password_ok")
+        self.assertIsNotNone(self.db.authenticate_user("ana", "clave-nueva-789"))
+        await asyncio.sleep(0.1)
+        await midgard.control({"op": "history"})
+        history = (await midgard.recv_op("history"))["items"]
+        self.assertEqual((history[0]["asgard"], history[0]["name"], history[0]["reason"]), ("aula-1", "Aula 1", "logout"))
+
 
 class LobbyTests(ServerTestCase):
-    async def test_listing_reflects_connection_and_session_state(self) -> None:
+    async def test_listing_shows_only_permitted_asgards_and_their_state(self) -> None:
         midgard, _ = await self.midgard()
-        await midgard.control({"op": "list"})
+        await self.auth(midgard)
         items = {item["id"]: item for item in (await midgard.recv_op("asgards"))["items"]}
+        self.assertEqual(set(items), {"aula-1"})  # ana no tiene permiso sobre aula-2
         self.assertEqual(items["aula-1"]["status"], STATUS_OFFLINE)
         self.assertEqual(items["aula-1"]["location"], "Edificio A")
 
@@ -260,14 +324,32 @@ class LobbyTests(ServerTestCase):
         self.assertTrue(pushed["aula-1"]["capabilities"]["ai"])
 
         other, _ = await self.midgard()
-        self.assertEqual((await self.login(other, "luis", PASSWORD_LUIS))["op"], "login_ok")
+        self.assertEqual((await self.login(other, "luis", PASSWORD_LUIS))["op"], "session_ok")
         busy = {item["id"]: item for item in (await midgard.recv_op("asgards"))["items"]}
         self.assertEqual(busy["aula-1"]["status"], STATUS_BUSY)
+
+    async def test_administrators_see_every_asgard(self) -> None:
+        self.db.add_user("jefa", "clave-de-jefa-1", admin=True)
+        midgard, _ = await self.midgard()
+        await self.auth(midgard, "jefa", "clave-de-jefa-1")
+        items = {item["id"] for item in (await midgard.recv_op("asgards"))["items"]}
+        self.assertEqual(items, {"aula-1", "aula-2"})
 
     async def test_second_user_gets_busy_while_session_is_active(self) -> None:
         await self.session()
         other, _ = await self.midgard()
         self.assertEqual((await self.login(other, "luis", PASSWORD_LUIS))["code"], "busy")
+
+    async def test_status_file_describes_the_server(self) -> None:
+        self.server.config.status_path = self.data / "estado.json"
+        await self.session()
+        await self.server._write_status()
+        import json
+
+        status = json.loads((self.data / "estado.json").read_text(encoding="utf-8"))
+        self.assertTrue(status["running"])
+        self.assertEqual((status["asgards"], status["users"]), (["aula-1"], ["ana"]))
+        self.assertEqual(status["sessions"][0]["asgard"], "aula-1")
 
 
 class SessionTests(ServerTestCase):

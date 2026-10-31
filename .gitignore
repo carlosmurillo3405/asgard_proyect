@@ -24,3 +24,6 @@ __pycache__/
 /Midgard/Software/midgard.sh
 /Midgard/Software/Midgard.command
 *.log
+/Midgard/Software/midgard.ico
+/Midgard/Software/midgard.png
+/Demo/datos/

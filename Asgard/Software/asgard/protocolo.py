@@ -42,7 +42,9 @@ from typing import Any
 # --------------------------------------------------------------------------- #
 # Constantes generales
 # --------------------------------------------------------------------------- #
-PROTOCOL_VERSION = 1
+# Versión 2: Midgard inicia sesión (usuario y contraseña) antes de elegir el
+# Asgard; el listado solo se muestra a usuarios autenticados.
+PROTOCOL_VERSION = 2
 DEFAULT_PORT = 8765
 DEFAULT_AUDIO_PORT = 5004
 DISCOVERY_PORT = 8767
@@ -51,6 +53,7 @@ MAX_PACKET_SIZE = 16 * 1024 * 1024
 MAX_CONTROL_PACKET_SIZE = 512 * 1024
 MAX_METADATA_SIZE = 64 * 1024
 MAX_CHAT_LENGTH = 1000
+MAX_AVATAR_BYTES = 96 * 1024
 KEEPALIVE_INTERVAL = 10.0
 
 ROLE_ASGARD = "asgard"

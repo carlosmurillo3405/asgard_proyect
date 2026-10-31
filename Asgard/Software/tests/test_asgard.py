@@ -19,6 +19,8 @@ import numpy as np
 from asgard.actuador import HandActuator, SimHand
 from asgard.aplicacion import AsgardApp, StateStore, parse_server
 from asgard.config import EXAMPLE_CONFIG, ConfigError, load_config, parse_bool, set_values
+from asgard.pantalla import HeadlessScreen
+from asgard.protocolo import b64encode
 from asgard.seguimiento import (
     MODE_AUTO,
     MODE_FOLLOW,
@@ -265,6 +267,36 @@ class AppCommandTests(unittest.TestCase):
         self.command(cmd="ptz_mode", mode="girar")
         self.command(cmd="desconocido")
         self.assertTrue(self.app.active)
+
+    def test_developer_data_avatar_and_tracking_params(self) -> None:
+        self.command(cmd="tracking_params", deadzone=3, aim_y=0.2, sensitivity=0.8)
+        params = self.app.director.params
+        self.assertEqual((params.deadzone, params.aim_y, params.sensitivity), (3.0, 0.2, 0.8))
+        self.assertEqual(self.app.store.data["tracking"]["deadzone"], 3.0)
+        # Vista de desarrollador en Midgard: las detecciones llevan el esqueleto y el punto de mira.
+        self.command(cmd="debug", enabled=True)
+        self.assertTrue(self.app.debug)
+        self.app.director.set_mode(MODE_AUTO)
+        self.app.director.update(self.app.world.poses())
+        message = self.app.director.detections_message(points=self.app.debug)
+        self.assertTrue(message["items"])
+        self.assertTrue(all(len(item["pts"]) == 13 for item in message["items"]))
+        self.assertIsNotNone(message["aim"])
+        state = self.app.state_message()
+        self.assertIn("target_pan", state["servo"])
+        self.assertEqual(state["params"]["aim_y"], 0.2)
+        # Foto de perfil: solo JPEG o PNG; vacía la quita.
+        recorded: list[bytes | None] = []
+
+        class RecordingScreen(HeadlessScreen):
+            def set_avatar(self, data: bytes | None) -> None:
+                recorded.append(data)
+
+        self.app.screen = RecordingScreen()
+        self.command(cmd="avatar", image=b64encode(b"\xff\xd8foto"))
+        self.command(cmd="avatar", image=b64encode(b"GIF89a"))
+        self.command(cmd="avatar", image="")
+        self.assertEqual(recorded, [b"\xff\xd8foto", None])
 
     def test_deactivation_returns_to_rest(self) -> None:
         self.command(cmd="hand", raised=True)

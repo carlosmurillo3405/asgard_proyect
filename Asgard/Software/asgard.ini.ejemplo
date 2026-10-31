@@ -79,3 +79,4 @@ punto_mira = 0.35            ; altura del cuerpo a centrar (0 = cabeza, 0.5 = to
 [pantalla]
 modo = completa              ; completa, ventana o ninguna (sin monitor)
 tamano_chat = 20             ; tamaño de letra de los mensajes
+diagnostico = no             ; si = línea de diagnóstico (cámara, servos, IA) al pie de la pantalla

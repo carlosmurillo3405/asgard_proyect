@@ -36,6 +36,7 @@ from .imagen import FrameGrabber, encode_jpeg, make_transform
 from .pantalla import HeadlessScreen
 from .protocolo import (
     DEFAULT_PORT,
+    MAX_AVATAR_BYTES,
     MAX_CHAT_LENGTH,
     PROTOCOL_VERSION,
     ROLE_ASGARD,
@@ -191,9 +192,10 @@ class AsgardApp:
         params = TrackingParams(
             sensitivity=float(tracking.get("sensitivity", 0.5)),
             speed=float(tracking.get("speed", servo_cfg.speed)),
+            deadzone=float(tracking.get("deadzone", 1.5)),
             invert_pan=bool(tracking.get("invert_pan", servo_cfg.invert_pan)),
             invert_tilt=bool(tracking.get("invert_tilt", servo_cfg.invert_tilt)),
-            aim_y=config.ai.aim_y,
+            aim_y=float(tracking.get("aim_y", config.ai.aim_y)),
         )
         self.pantilt.max_speed = params.speed
         aspect = config.video.width / config.video.height
@@ -217,6 +219,7 @@ class AsgardApp:
         self.want_video = True
         self.want_audio = True
         self.detect_enabled = True
+        self.debug = False            # Midgard en vista de desarrollador: se envían puntos del cuerpo
         self.remote_streams = {"camera": False, "screen": False, "mic": False}
         self.camera: Any = None
         self.grabber: FrameGrabber | None = None
@@ -383,7 +386,7 @@ class AsgardApp:
         where = f"{endpoint.host}:{endpoint.port}" if endpoint else ""
         self.screen.set_link(True, f"{where} · modo {meta.get('mode', '?')}")
         if meta.get("name"):
-            self.screen.set_title(str(meta["name"]))
+            self.screen.set_title(str(meta["name"]), str(meta.get("location") or ""))
         log.info("Conectado a %s (%s) en modo %s", meta.get("server", "Bifröst"), where, meta.get("mode"))
         session = meta.get("session")
         if isinstance(session, dict):
@@ -431,6 +434,7 @@ class AsgardApp:
         session_id = info.get("session") if isinstance(info.get("session"), str) else info.get("id")
         user = info.get("user") if isinstance(info.get("user"), dict) else {}
         display = str(user.get("display") or user.get("name") or "Midgard")
+        login = str(user.get("name") or "")
         if self.active and session_id == self.session_id:
             # Reanudación tras una reconexión: las credenciales de audio cambiaron.
             self._set_peer(True)
@@ -445,8 +449,9 @@ class AsgardApp:
         self.peer_connected = True
         self.want_video = True
         self.want_audio = True
+        self.debug = False
         self.remote_streams = {"camera": False, "screen": False, "mic": False}
-        self.screen.show_session(display)
+        self.screen.show_session(display, login)
         self.pantilt.set_target(*self.pantilt.target())
         self._start_media()
         log.info("Sesión %s activa con %s: emitiendo video y audio", self.session_id, display)
@@ -536,7 +541,7 @@ class AsgardApp:
         now = time.monotonic()
         if now - self._last_detections >= 0.08:
             self._last_detections = now
-            self.link.send_control(self.director.detections_message())
+            self.link.send_control(self.director.detections_message(points=self.debug))
 
     def _start_audio(self) -> None:
         if not self.config.audio.enabled or not self.audio_credentials or self.link.endpoint is None:
@@ -598,6 +603,16 @@ class AsgardApp:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ProtocolError(f"'{key}' debe ser un número.")
         return clamp(float(value), low, high)
+
+    @staticmethod
+    def _avatar(meta: dict[str, Any]) -> bytes | None:
+        """Foto de perfil del usuario (JPEG o PNG pequeño) o None para quitarla."""
+        if not meta.get("image"):
+            return None
+        data = b64decode(meta.get("image"))
+        if len(data) > MAX_AVATAR_BYTES or not (data.startswith(b"\xff\xd8") or data.startswith(b"\x89PNG")):
+            raise ProtocolError("La foto de perfil no es válida.")
+        return data
 
     @staticmethod
     def _preset_name(meta: dict[str, Any]) -> str:
@@ -666,12 +681,20 @@ class AsgardApp:
             if "speed" in meta:
                 params.speed = self._number(meta, "speed", 10, 300)
                 self.pantilt.max_speed = params.speed
+            if "deadzone" in meta:
+                params.deadzone = self._number(meta, "deadzone", 0, 10)
+            if "aim_y" in meta:
+                params.aim_y = self._number(meta, "aim_y", 0, 1)
             if "invert_pan" in meta:
                 params.invert_pan = bool(meta["invert_pan"])
             if "invert_tilt" in meta:
                 params.invert_tilt = bool(meta["invert_tilt"])
             self.store.data["tracking"] = params.to_dict()
             self.store.save()
+        elif command == "debug":
+            self.debug = bool(meta.get("enabled"))
+        elif command == "avatar":
+            self.screen.set_avatar(self._avatar(meta))
         elif command == "ai":
             self.detect_enabled = bool(meta.get("detect", True))
             if self.detect_enabled and self.ai_available:
@@ -724,6 +747,7 @@ class AsgardApp:
 
     def state_message(self) -> dict[str, Any]:
         pan, tilt = self.pantilt.current()
+        target_pan, target_tilt = self.pantilt.target()
         snapshot = self.director.snapshot()
         grabber = self.grabber
         frame, _ = grabber.latest() if grabber is not None else (None, 0)
@@ -769,8 +793,17 @@ class AsgardApp:
                 "speaker": bool(audio is not None and audio.stats()["speaker"]),
             },
             "servos": getattr(self.servo_backend, "name", "?"),
+            "servo": {
+                "target_pan": round(target_pan, 1),
+                "target_tilt": round(target_tilt, 1),
+                "moving": self.pantilt.moving,
+                "attached": self.pantilt.attached,
+                "speed": round(self.pantilt.max_speed, 1),
+                "simulated": bool(getattr(self.servo_backend, "simulated", False)),
+            },
             "actuator": self.hand.name,
             "simulation": self.simulate,
+            "software": f"asgard {__version__}",
         }
 
     def _send_state(self) -> None:

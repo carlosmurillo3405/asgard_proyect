@@ -246,4 +246,11 @@ echo "  Siguientes pasos:"
 echo "    bifrost usuario agregar ana --nombre \"Ana López\""
 echo "    bifrost asgard registrar aula-1 --nombre \"Aula 1\" --ubicacion \"Edificio A\""
 echo "    bifrost permiso otorgar ana aula-1"
-echo "    sudo systemctl status bifrost"
+if [ "$MODO" = "publico" ]; then
+    SERVIDOR_PUBLICO="${NOMBRE_PUBLICO%%,*}"
+    echo "    bifrost cliente --servidor ${SERVIDOR_PUBLICO:-<dominio>} --tls$( [ -n "$CERT" ] && echo " --sin-huella") --salida servidor.json"
+    echo "      (copia servidor.json junto al instalador de Midgard: los usuarios solo escriben usuario y contraseña)"
+fi
+echo "  Ver si está en ejecución:"
+echo "    bifrost estado            # resumen"
+echo "    bifrost monitor           # vista en vivo con barra de estado (Ctrl+C para salir)"

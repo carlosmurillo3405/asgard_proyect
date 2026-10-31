@@ -387,6 +387,21 @@ class Database:
             ).fetchone()
         return row is not None
 
+    def allowed_devices(self, user: UserRecord) -> set[str] | None:
+        """Asgard a los que puede entrar el usuario; ``None`` significa todos."""
+        current = self.get_user(user.username)
+        if current is None or not current.active:
+            return set()
+        if current.is_admin or current.full_access:
+            return None
+        with self._db() as db:
+            rows = db.execute(
+                """SELECT a.identificador FROM permisos p JOIN asgards a ON a.id = p.asgard_id
+                   WHERE p.usuario_id = ?""",
+                (current.id,),
+            ).fetchall()
+        return {row[0] for row in rows}
+
     def permissions(self, username: str | None = None) -> list[tuple[str, str]]:
         """Pares (usuario, asgard); '*' representa acceso total o administrador."""
         query = """SELECT u.usuario AS usuario, a.identificador AS asgard
@@ -426,11 +441,14 @@ class Database:
             )
             return cursor.rowcount
 
-    def recent_sessions(self, limit: int = 20) -> list[SessionRecord]:
+    def recent_sessions(self, limit: int = 20, username: str | None = None) -> list[SessionRecord]:
+        query = "SELECT * FROM sesiones"
+        params: tuple[object, ...] = ()
+        if username:
+            query += " WHERE usuario = ? COLLATE NOCASE"
+            params = (username,)
         with self._db() as db:
-            rows = db.execute(
-                "SELECT * FROM sesiones ORDER BY inicio DESC LIMIT ?", (max(1, int(limit)),)
-            ).fetchall()
+            rows = db.execute(query + " ORDER BY inicio DESC LIMIT ?", (*params, max(1, int(limit)))).fetchall()
         return [
             SessionRecord(row["id"], row["usuario"], row["asgard"], row["direccion"], row["inicio"], row["fin"], row["motivo"])
             for row in rows

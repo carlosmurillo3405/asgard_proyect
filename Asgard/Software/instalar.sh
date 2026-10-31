@@ -117,13 +117,21 @@ fi
 # --------------------------------------------------------------------------- #
 if [ "$APT" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
     info "Instalando paquetes del sistema (pedirá tu contraseña)"
-    paquetes=(python3 python3-venv python3-pip python3-dev python3-tk libportaudio2 portaudio19-dev
+    paquetes=(python3 python3-venv python3-pip python3-dev libportaudio2 portaudio19-dev
               libgl1 libglib2.0-0 build-essential i2c-tools)
     for opcional in python3-gpiozero python3-lgpio python3-picamera2 python3-numpy; do
         if apt-cache show "$opcional" >/dev/null 2>&1; then
             paquetes+=("$opcional")
         fi
     done
+    # Pantalla del aula (Qt): PyQt6 si el sistema lo tiene; si no, PyQt5 (Raspberry Pi OS antiguo).
+    if apt-cache show python3-pyqt6 >/dev/null 2>&1; then
+        paquetes+=(python3-pyqt6)
+        apt-cache show qt6-wayland >/dev/null 2>&1 && paquetes+=(qt6-wayland)
+    elif apt-cache show python3-pyqt5 >/dev/null 2>&1; then
+        paquetes+=(python3-pyqt5)
+        apt-cache show qtwayland5 >/dev/null 2>&1 && paquetes+=(qtwayland5)
+    fi
     if [ "$PIGPIO" -eq 1 ]; then
         paquetes+=(pigpio python3-pigpio)
     fi
@@ -183,6 +191,11 @@ if [ "$IA" -eq 1 ]; then
 fi
 "$PY" -c "import cv2, numpy, PIL, sounddevice, cryptography" \
     || error "Faltan dependencias básicas; revisa los mensajes anteriores."
+if ! (cd "$DIR" && "$PY" -c "from asgard import qt") >/dev/null 2>&1; then
+    aviso "No se encontró PyQt del sistema; se intenta instalar PySide6 con pip para la pantalla del aula."
+    "$PY" -m pip install --quiet -c "$RESTRICCIONES" -r "$DIR/requirements-pantalla.txt" \
+        || aviso "Sin interfaz Qt: Asgard funcionará sin pantalla (solo audio, video y servos)."
+fi
 
 # --------------------------------------------------------------------------- #
 # Configuración

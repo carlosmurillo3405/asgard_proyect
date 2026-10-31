@@ -12,6 +12,7 @@ Administración::
     python main.py usuario agregar ana --nombre "Ana López"
     python main.py asgard registrar aula-1 --nombre "Aula 1"
     python main.py permiso otorgar ana aula-1
+    python main.py estado | monitor
 
 Consulta README.md para la guía completa.
 """
@@ -30,9 +31,10 @@ import sys
 from pathlib import Path
 
 from bifrost import __version__
-from bifrost.admin import ADMIN_COMMANDS, database_path, default_data_dir, ensure_certificate
+from bifrost.admin import ADMIN_COMMANDS, database_path, default_data_dir, ensure_certificate, status_path
 from bifrost.admin import main as admin_main
 from bifrost.base_datos import Database
+from bifrost.consola import BarraEstado, ManejadorConsola, resumen, soporta_estilo
 from bifrost.protocolo import (
     DEFAULT_AUDIO_PORT,
     DEFAULT_PORT,
@@ -67,7 +69,7 @@ def parse_server_args(argv: list[str]) -> argparse.Namespace:
         prog="main.py",
         description="Bifröst: servidor puente entre Asgard y Midgard.",
         epilog=(
-            "Administración: main.py usuario|asgard|permiso|sesiones|huella|certificado ... "
+            "Administración: main.py usuario|asgard|permiso|sesiones|huella|certificado|cliente|estado|monitor ... "
             "(usa 'main.py usuario -h' para ver la ayuda)."
         ),
     )
@@ -92,6 +94,8 @@ def parse_server_args(argv: list[str]) -> argparse.Namespace:
                         help="segundos que se conserva una sesión si un cliente se desconecta (30)")
     parser.add_argument("--registro", default="info", choices=("debug", "info", "warning", "error"),
                         help="nivel de detalle de los mensajes")
+    parser.add_argument("--sin-estilo", action="store_true",
+                        help="sin colores ni barra de estado en la terminal (texto simple)")
     parser.add_argument("--version", action="version", version=f"Bifröst {__version__}")
     args = parser.parse_args(argv)
     if bool(args.cert) != bool(args.clave):
@@ -112,14 +116,18 @@ def _is_public_address(host: str) -> bool:
     return not (address.is_private or address.is_loopback or address.is_link_local or address.is_unspecified)
 
 
-def setup_logging(data_dir: Path, level: str) -> None:
+def setup_logging(data_dir: Path, level: str, styled: bool) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper()))
-    console = logging.StreamHandler()
-    console.setFormatter(formatter)
-    root.addHandler(console)
+    if styled:
+        # Registros con color por la salida estándar, sin pisar la barra de estado.
+        root.addHandler(ManejadorConsola(sys.stdout))
+    else:
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        root.addHandler(console)
     try:
         file_handler = logging.handlers.RotatingFileHandler(
             data_dir / "bifrost.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"
@@ -156,6 +164,8 @@ def build_config(args: argparse.Namespace) -> ServerConfig:
         ssl_context=context,
         tls_fingerprint=fingerprint,
         max_connections_per_ip=20 if args.modo == MODE_PUBLIC else 40,
+        status_path=status_path(args.datos),
+        public_name=args.nombre_publico.split(",")[0].strip(),
     )
 
 
@@ -171,42 +181,45 @@ def _quiet_handshake_errors(loop: asyncio.AbstractEventLoop, context: dict) -> N
     loop.default_exception_handler(context)
 
 
-def print_summary(server: BifrostServer, config: ServerConfig, db: Database, data_dir: Path) -> None:
+def print_summary(server: BifrostServer, config: ServerConfig, db: Database, data_dir: Path, styled: bool) -> None:
     counts = db.counts()
     mode = "PÚBLICO (Internet)" if config.mode == MODE_PUBLIC else "LOCAL (red local)"
     lines = [
-        "",
-        f"Bifröst {__version__} en modo {mode}",
-        f"  Control y video : TCP {config.host}:{server.tcp_port}",
-        f"  Audio           : UDP {config.host}:{server.audio_port}",
+        ("Modo", mode),
+        ("Control y video", f"TCP {config.host}:{server.tcp_port}"),
+        ("Audio", f"UDP {config.host}:{server.audio_port}"),
     ]
     if server.discovery_port:
-        lines.append(f"  Descubrimiento  : UDP {server.discovery_port} (los clientes pueden usar servidor = auto)")
+        lines.append(("Descubrimiento", f"UDP {server.discovery_port} (Midgard y Asgard lo encuentran solos)"))
     if config.ssl_context:
-        lines.append(f"  TLS             : activo · huella SHA-256 {format_fingerprint(config.tls_fingerprint)}")
+        lines.append(("TLS", f"activo · huella SHA-256 {format_fingerprint(config.tls_fingerprint)}"))
     else:
-        lines.append("  TLS             : desactivado (solo para redes locales de confianza)")
-    lines.append(f"  Base de datos   : {database_path(data_dir)} ({counts['usuarios']} usuarios, {counts['asgards']} Asgard)")
+        lines.append(("TLS", "desactivado (solo para redes locales de confianza)"))
+    lines.append(("Base de datos", f"{database_path(data_dir)} ({counts['usuarios']} usuarios, {counts['asgards']} Asgard)"))
     addresses = local_ipv4_addresses()
     if addresses:
-        lines.append(f"  IP de este equipo: {', '.join(addresses)}")
-    lines.append(f"  Firewall        : permite TCP {server.tcp_port} y UDP {server.audio_port}")
+        lines.append(("IP de este equipo", ", ".join(addresses)))
+    lines.append(("Firewall", f"permite TCP {server.tcp_port} y UDP {server.audio_port}"))
+    if config.mode == MODE_PUBLIC:
+        lines.append(("Midgard", "entrega servidor.json: python main.py cliente --servidor <dominio> --tls"))
     if counts["usuarios"] == 0:
-        lines.append("  Aviso: no hay usuarios. Crea uno con: python main.py usuario agregar <usuario>")
+        lines.append(("Aviso", "no hay usuarios. Crea uno con: python main.py usuario agregar <usuario>"))
     if counts["asgards"] == 0:
-        lines.append("  Aviso: no hay Asgard registrados. Registra uno con: python main.py asgard registrar <id>")
-    lines.append("Presiona Ctrl+C para detener.\n")
-    print("\n".join(lines), flush=True)
+        lines.append(("Aviso", "no hay Asgard registrados: python main.py asgard registrar <id>"))
+    if not styled:
+        lines.append(("", "Presiona Ctrl+C para detener."))
+    print(resumen(lines, f"Bifröst {__version__}", "● en ejecución", styled), flush=True)
 
 
-async def run_server(args: argparse.Namespace) -> None:
+async def run_server(args: argparse.Namespace, styled: bool) -> None:
     config = build_config(args)
     db = Database(database_path(args.datos))
     server = BifrostServer(config, db)
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(_quiet_handshake_errors)
     await server.start()
-    print_summary(server, config, db, args.datos)
+    print_summary(server, config, db, args.datos, styled)
+    bar = BarraEstado(sys.stdout, server.status) if styled else None
     stop = asyncio.Event()
     for signal_number in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -214,9 +227,23 @@ async def run_server(args: argparse.Namespace) -> None:
         except (NotImplementedError, RuntimeError, ValueError):
             pass  # Windows: Ctrl+C llega como KeyboardInterrupt.
     serving = asyncio.create_task(server.serve_forever())
+
+    async def animate() -> None:
+        assert bar is not None
+        bar.iniciar()
+        while True:
+            bar.dibujar()
+            await asyncio.sleep(0.12)
+
+    animation = asyncio.create_task(animate()) if bar is not None else None
     try:
         await stop.wait()
     finally:
+        if animation is not None:
+            animation.cancel()
+            await asyncio.gather(animation, return_exceptions=True)
+        if bar is not None:
+            bar.detener()
         log.info("Deteniendo Bifröst...")
         serving.cancel()
         await asyncio.gather(serving, return_exceptions=True)
@@ -240,9 +267,10 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in ADMIN_COMMANDS:
         return admin_main(argv)
     args = parse_server_args(argv)
-    setup_logging(args.datos, args.registro)
+    styled = not args.sin_estilo and soporta_estilo(sys.stdout)
+    setup_logging(args.datos, args.registro, styled)
     try:
-        asyncio.run(run_server(args))
+        asyncio.run(run_server(args, styled))
     except KeyboardInterrupt:
         pass
     except OSError as error:

@@ -4,10 +4,12 @@ Sistema de telepresencia para el aula. Un **Asgard** (Raspberry Pi con cámara, 
 
 | Programa | Dónde corre | Función | Guía |
 | --- | --- | --- | --- |
-| **Asgard** | Raspberry Pi del aula | Cliente dedicado: emite audio y video en máxima calidad, sigue personas con IA, mueve los servos, acciona la mano y muestra el chat y la pantalla de Midgard. | [Asgard/Software/README.md](Asgard/Software/README.md) |
-| **Bifröst** | Servidor Linux (red local o Internet) | Puente: autentica usuarios y Asgard contra su base de datos, publica la lista de Asgard, enlaza las sesiones y retransmite todo. | [Bifröst/README.md](Bifröst/README.md) |
-| **Midgard** | PC del usuario (Windows, Linux o macOS) | Cliente de usuario: lista de Asgard, acceso con credenciales, control de cámara, seguimiento, chat, mano, pantalla compartida, dispositivos y calidad. | [Midgard/Software/README.md](Midgard/Software/README.md) |
-| Comun | — | Código compartido y referencia del protocolo. | [Comun/README.md](Comun/README.md) |
+| **Asgard** | Raspberry Pi del aula | Cliente dedicado: emite audio y video en máxima calidad, sigue personas con IA, mueve los servos, acciona la mano y, en su pantalla, muestra quién está conectado, su pantalla compartida, la mano y los mensajes. | [Asgard/Software/README.md](Asgard/Software/README.md) |
+| **Bifröst** | Servidor Linux (red local o Internet) | Puente: autentica usuarios y Asgard contra su base de datos, muestra a cada usuario sus Asgard, enlaza las sesiones y retransmite todo. En la terminal se ve en vivo que está en ejecución. | [Bifröst/README.md](Bifröst/README.md) |
+| **Midgard** | PC del usuario (Windows, Linux o macOS) | Cliente de usuario: inicio de sesión, lista de sus Asgard, llamada con control de cámara, seguimiento, chat, mano, pantalla compartida, dispositivos y calidad; vista avanzada para desarrolladores. | [Midgard/Software/README.md](Midgard/Software/README.md) |
+| Comun | — | Código compartido, kit visual (plantilla «UI-Asgard») y referencia del protocolo. | [Comun/README.md](Comun/README.md) |
+
+Las interfaces de Midgard y de la pantalla del aula siguen la plantilla de diseño «UI-Asgard»: tema oscuro, tipografía Inter, el logotipo y el patrón de runas, diseño adaptable a cualquier tamaño de ventana y animaciones suaves. Están hechas con Qt (PySide6 en las PC; PyQt6 o PyQt5 de Raspberry Pi OS en el aula).
 
 ## Arquitectura
 
@@ -20,11 +22,12 @@ Sistema de telepresencia para el aula. Un **Asgard** (Raspberry Pi con cámara, 
  │ IA (MediaPipe) → servos      │◄───────┤  · sesiones y         │◄───────┤ cámara, pantalla compartida  │
  │ mano, pantalla y chat        │  cmds  │    reconexión         │  cmds  │ chat, mano, control cámara   │
  └──────────────────────────────┘        │  · modo local/público │        └──────────────────────────────┘
-        siempre conectado,               └───────────────────────┘          lista de Asgard → usuario y
-        en reposo hasta que                 TCP 8765 · UDP 5004              contraseña → sesión
+        siempre conectado,               └───────────────────────┘          usuario y contraseña → sus
+        en reposo hasta que                 TCP 8765 · UDP 5004              Asgard → llamada
         entra un usuario válido
 ```
 
+- **Midgard** inicia sesión primero (usuario y contraseña verificados en la base de datos de Bifröst); luego ve solo los Asgard a los que tiene permiso y entra a uno.
 - **Asgard** se mantiene conectado a Bifröst en reposo. Cuando un usuario con permiso entra desde Midgard, se activa solo y empieza a emitir.
 - **Bifröst** funciona en `--modo local` (red de la escuela, con búsqueda automática) o `--modo publico` (Internet, con TLS obligatorio).
 - Video: JPEG con descarte de cuadros viejos, para que no se acumule retraso. Audio: PCM de 48 kHz y 16 bits por UDP cifrado, con respaldo automático por TCP.
@@ -45,11 +48,15 @@ Sistema de telepresencia para el aula. Un **Asgard** (Raspberry Pi con cámara, 
    ```bash
    cd Asgard/Software && ./instalar.sh --dispositivo aula-1 --secreto <SECRETO> --servidor auto
    ```
-3. **Usuario**: en Windows, doble clic en `Midgard/Software/instalar_windows.bat`. Abre Midgard, pulsa **Buscar en la red local**, elige «Aula 1» y entra con su usuario.
+3. **Usuario**: en Windows, doble clic en `Midgard/Software/instalar_windows.bat`. Abre Midgard, escribe su usuario y contraseña (Midgard encuentra el servidor solo en la red local), elige «Aula 1» y entra.
 
 ### Por Internet
 
-Instala Bifröst en un servidor con IP pública (`sudo ./instalar.sh --modo publico --nombre-publico <dominio o IP> --abrir-firewall`) y abre TCP 8765 y UDP 5004. En el Asgard usa `--servidor <dominio> --huella <huella de 'bifrost huella'>`. En Midgard marca **TLS** y acepta la huella la primera vez. Los detalles están en la [guía de Bifröst](Bifröst/README.md#red-pública-y-certificados).
+1. Instala Bifröst en un servidor con IP pública (`sudo ./instalar.sh --modo publico --nombre-publico <dominio o IP> --abrir-firewall`) y abre TCP 8765 y UDP 5004.
+2. En el Asgard usa `--servidor <dominio> --huella <huella de 'bifrost huella'>`.
+3. Crea el archivo de conexión de Midgard: `bifrost cliente --servidor <dominio> --tls --salida servidor.json`, cópialo en `Midgard/Software/` e instala (o construye el ejecutable). Así cada usuario ya tiene asignado el servidor y solo escribe su usuario y contraseña.
+
+Los detalles están en la [guía de Bifröst](Bifröst/README.md#red-pública-y-certificados).
 
 ### Probar todo en una sola computadora (sin hardware)
 
@@ -57,9 +64,9 @@ Con Python 3.10+ y un solo entorno virtual. Usa Python 3.10–3.13 si quieres Me
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install -r Asgard/Software/requirements.txt mss      # Windows: .venv\Scripts\pip ...
+.venv/bin/pip install -r Asgard/Software/requirements.txt mss PySide6-Essentials   # Windows: .venv\Scripts\pip ...
 
-# Terminal 1: servidor
+# Terminal 1: servidor (la terminal muestra la barra «BIFRÖST EN EJECUCIÓN»)
 cd Bifröst
 ../.venv/bin/python main.py usuario agregar ana          # pide la contraseña
 ../.venv/bin/python main.py asgard registrar aula-1      # copia el secreto
@@ -73,10 +80,14 @@ cd Asgard/Software
 
 # Terminal 3: Midgard
 cd Midgard/Software
-../../.venv/bin/python main.py --servidor 127.0.0.1 --usuario ana
+../../.venv/bin/python main.py --usuario ana             # encuentra el servidor en la red local
 ```
 
-En Midgard, haz clic sobre una persona del video simulado y verás cómo la cámara virtual la sigue.
+En Midgard inicia sesión, entra a «Aula 1» y haz clic sobre una persona del video simulado: la cámara virtual la sigue. Con la vista avanzada verás el esqueleto, las trayectorias y los servos.
+
+### Ver solo las ventanas (demostración)
+
+`Demo/probar_ventanas.bat` (doble clic en Windows) o `python Demo/probar_ventanas.py [ambas|midgard|asgard]` abre las ventanas verdaderas de Midgard y de la pantalla del aula con un servidor y un aula simulados dentro del mismo programa: no usa red, servidor ni hardware. Sirve cualquier usuario y contraseña (la contraseña «error» muestra el rechazo); «Aula 1» abre la llamada. Los ajustes de la demostración se guardan en `Demo/datos/`.
 
 ## Estructura del repositorio
 
@@ -84,7 +95,9 @@ En Midgard, haz clic sobre una persona del video simulado y verás cómo la cám
 Asgard/Software/     cliente del aula: main.py, asgard/, instalar.sh, asgard.ini.ejemplo, tests/
 Bifröst/             servidor: main.py, bifrost/, instalar.sh, tests/
 Midgard/Software/    cliente de usuario: main.py, midgard/, instaladores (Windows, Linux/macOS), tests/
-Comun/               código compartido (fuente única) + sincronizar.py + referencia del protocolo
+Comun/               código compartido (fuente única): protocolo, red, audio, imagen y kit visual
+                     (qt, tema, iconos, componentes, fuentes) + sincronizar.py + referencia del protocolo
+Demo/                demostración de las ventanas sin red ni hardware (probar_ventanas.bat / .py)
 pruebas_sistema/     prueba del sistema completo (Bifröst + Asgard simulado + Midgard)
 Pruebas/             prototipos originales por bloque (audio, video, pantalla, IA, chat, acciones)
 ```
@@ -94,14 +107,14 @@ Cada programa se instala por separado con su propio instalador y archivo `requir
 ## Pruebas automáticas
 
 ```bash
-python -m unittest discover -s Comun/tests -t .            # protocolo, audio, imagen, enlace
+python -m unittest discover -s Comun/tests -t .            # protocolo, audio, imagen, enlace y kit visual
 python -m unittest discover -s pruebas_sistema -t .        # sistema completo de punta a punta
 cd Bifröst && python -m unittest discover -s tests -t .
 cd Asgard/Software && python -m unittest discover -s tests -t .
 cd Midgard/Software && python -m unittest discover -s tests -t .
 ```
 
-La prueba del sistema levanta un Bifröst real, un Asgard simulado y el controlador de Midgard. Verifica la lista, el acceso, el video en máxima calidad, la cámara manual y el punto fijo, el seguimiento de una persona hasta centrarla, la mano, el chat, el audio por UDP y por TCP, la pantalla compartida, la reconexión con reanudación de sesión y el modo público con TLS.
+La prueba del sistema levanta un Bifröst real, un Asgard simulado y el controlador de Midgard. Verifica el inicio de sesión, la lista por permisos, la llamada, el video en máxima calidad, la cámara manual y el punto fijo, el seguimiento de una persona hasta centrarla, la mano, el chat, el audio por UDP y por TCP, la pantalla compartida, los datos de la vista de desarrollador, la foto de perfil, cerrar sesión, la reconexión con reanudación y el modo público con TLS. Las pruebas de interfaz usan Qt en modo `offscreen`: recorren las pantallas sin abrir ventanas.
 
 ## Prototipos por bloque (`Pruebas/`)
 

@@ -63,13 +63,28 @@ class DatabaseTests(unittest.TestCase):
         self.assertTrue(self.db.has_permission(admin, "aula-2"))
         self.assertIn(("jefe", "*"), self.db.permissions())
 
+    def test_allowed_devices_reflect_current_permissions(self) -> None:
+        self.db.register_asgard("aula-1", "Aula 1")
+        self.db.register_asgard("aula-2", "Aula 2")
+        ana = self.db.add_user("ana", "contraseña-ana")
+        self.assertEqual(self.db.allowed_devices(ana), set())
+        self.db.grant("ana", "aula-2")
+        self.assertEqual(self.db.allowed_devices(ana), {"aula-2"})
+        # El registro guardado en memoria no importa: se consulta el estado actual.
+        self.db.grant("ana", "*")
+        self.assertIsNone(self.db.allowed_devices(ana))
+        self.db.set_user_flags("ana", active=False)
+        self.assertEqual(self.db.allowed_devices(ana), set())
+
     def test_session_log_records_start_end_and_restart_cleanup(self) -> None:
         self.db.start_session("s1", "ana", "aula-1", "127.0.0.1")
         self.db.start_session("s2", "ana", "aula-1", "127.0.0.1")
+        self.db.start_session("s3", "luis", "aula-2", "127.0.0.1")
         self.db.end_session("s1", "logout")
-        self.assertEqual(self.db.close_open_sessions("reinicio"), 1)
+        self.assertEqual(self.db.close_open_sessions("reinicio"), 2)
         reasons = {record.id: record.reason for record in self.db.recent_sessions()}
-        self.assertEqual(reasons, {"s1": "logout", "s2": "reinicio"})
+        self.assertEqual(reasons, {"s1": "logout", "s2": "reinicio", "s3": "reinicio"})
+        self.assertEqual({r.id for r in self.db.recent_sessions(10, "ANA")}, {"s1", "s2"})
 
 
 class SecurityTests(unittest.TestCase):

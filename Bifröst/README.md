@@ -3,10 +3,11 @@
 Bifröst es el servidor dedicado (Linux) que une a los **Asgard** del aula con los usuarios de **Midgard**:
 
 - Mantiene conectados a todos los Asgard y publica su estado: *disponible*, *en sesión* o *desconectado*.
-- Verifica en su base de datos las credenciales de cada usuario y su permiso sobre el Asgard elegido.
+- Verifica en su base de datos el **usuario y la contraseña** de cada persona que abre Midgard; después le muestra **solo los Asgard a los que tiene permiso** y comprueba ese permiso al abrir la llamada.
 - Crea la sesión Midgard ⇄ Asgard y retransmite comandos, chat, telemetría, video, pantalla compartida y audio.
 - Conserva la sesión si alguno de los dos pierde la red unos segundos, y la reanuda sola.
 - Funciona en **red local** o en **red pública (Internet)**; el modo se elige con `--modo`.
+- En la terminal deja claro que está **en ejecución**: cambia el título, oculta el cursor y fija abajo una barra de estado animada (ver [Consola en vivo](#consola-en-vivo)).
 
 ```
 Midgard ──TCP/TLS 8765 (control + video)──┐                 ┌── Asgard
@@ -84,8 +85,31 @@ python main.py --modo publico --cert /ruta/fullchain.pem --clave /ruta/privkey.p
 | `--nombre` | `Bifröst` | Nombre visible (variable `BIFROST_NOMBRE`). |
 | `--gracia` | `30` | Segundos que se conserva una sesión si un cliente se desconecta. |
 | `--registro` | `info` | `debug`, `info`, `warning` o `error`. |
+| `--sin-estilo` | | Texto simple en la terminal, sin colores ni barra de estado. |
 
 Por seguridad, en modo local el servidor se niega a escuchar en una IP pública sin TLS.
+
+## Consola en vivo
+
+Al ejecutar Bifröst en una terminal (`python main.py --modo …`), la terminal cambia para que se note que el servicio está corriendo:
+
+- El **título** de la ventana pasa a «● Bifröst · en ejecución».
+- El **cursor se oculta** mientras corre (no hay nada que escribir).
+- Al arrancar se muestra un **recuadro de resumen** (modo, puertos, TLS y huella, base de datos, IP del equipo, firewall y avisos).
+- Las dos últimas filas quedan fijas con una **barra de estado animada**: `⠹ BIFRÖST EN EJECUCIÓN │ modo local │ TCP 8765 · UDP 5004 │ Asgard 2 │ usuarios 1 │ sesiones 1 │ activo 00:12:31 │ Ctrl+C para detener`. Si la terminal es angosta, se ocultan primero los datos menos importantes.
+- Los **registros** se desplazan por encima de la barra, con el nivel en color (información, avisos y errores).
+- Al detenerse (Ctrl+C o `systemctl stop`) se restauran el cursor, la zona de la terminal y el título («Bifröst (detenido)»).
+
+Funciona en las terminales de Linux y macOS y en Windows Terminal o la consola de Windows 10/11. Con la salida redirigida (servicio de systemd, archivos o tuberías) se escribe texto simple automáticamente; `--sin-estilo` o la variable `NO_COLOR` lo fuerzan.
+
+Cuando Bifröst corre como **servicio**, la terminal no está conectada a él. Para saber si está en ejecución:
+
+```bash
+bifrost estado      # ● Bifröst 1.1.0 en ejecución (pid, tiempo activo, modo, puertos, Asgard, usuarios, sesiones)
+bifrost monitor     # la misma barra de estado en vivo y el registro del servidor; Ctrl+C sale del monitor
+```
+
+`estado` devuelve el código 0 si está en ejecución y 3 si no (útil en scripts). Ambos leen `estado.json`, que el servidor actualiza cada pocos segundos en su carpeta de datos.
 
 ## Administración
 
@@ -117,7 +141,19 @@ bifrost permiso listar [ana]
 bifrost sesiones --limite 50                          # inicio, fin, usuario, Asgard, IP y motivo
 bifrost huella                                        # huella SHA-256 del certificado
 bifrost certificado --nombre-publico mi.dominio.com --forzar   # regenera el autofirmado
+
+# Servidor predeterminado de Midgard (los usuarios no escriben direcciones)
+bifrost cliente --servidor bifrost.midominio.com --tls --salida servidor.json   # con certificado autofirmado: incluye la huella
+bifrost cliente --servidor bifrost.midominio.com --tls --sin-huella --salida servidor.json   # Let's Encrypt
+
+# ¿Está en ejecución?
+bifrost estado
+bifrost monitor
 ```
+
+`servidor.json` se copia junto al instalador de Midgard (`Midgard/Software/`) antes de instalar o de construir el ejecutable: así cada usuario registrado ya tiene asignado el servidor y solo escribe su usuario y contraseña. En la red local no hace falta: Midgard encuentra a Bifröst solo.
+
+Los usuarios pueden cambiar su propia contraseña desde «Ver perfil» en Midgard (se pide la actual) y ver sus llamadas recientes.
 
 Los cambios en la base de datos se aplican al momento, sin reiniciar el servidor. La base es SQLite (`bifrost.db`, modo WAL), con las tablas `usuarios`, `asgards`, `permisos` y `sesiones`. Las contraseñas y los secretos se guardan con hash **scrypt** y sal.
 
@@ -126,7 +162,8 @@ Los cambios en la base de datos se aplican al momento, sin reiniciar el servidor
 1. En Bifröst: `bifrost asgard registrar aula-1 --nombre "Aula 1"` y copia el secreto.
 2. En la Raspberry del aula: `./instalar.sh --dispositivo aula-1 --secreto <secreto> --servidor <IP de Bifröst>` (ver el README de Asgard).
 3. En Bifröst: `bifrost usuario agregar ana` y `bifrost permiso otorgar ana aula-1`.
-4. Ana abre Midgard, se conecta al servidor, elige «Aula 1» y entra con su usuario.
+4. Si el servidor está en Internet: `bifrost cliente --servidor <dominio> --tls --salida servidor.json` y entrega Midgard con ese archivo.
+5. Ana abre Midgard, inicia sesión con su usuario y contraseña, elige «Aula 1» en su lista y entra.
 
 ## Puertos y firewall
 
@@ -143,29 +180,31 @@ Solo el servidor necesita puertos abiertos: Asgard y Midgard hacen conexiones sa
 - **Con dominio y Let's Encrypt** (recomendado): `sudo ./instalar.sh --modo publico --cert /etc/letsencrypt/live/<dominio>/fullchain.pem --clave /etc/letsencrypt/live/<dominio>/privkey.pem`. systemd entrega al servicio una copia legible del certificado aunque el original sea solo de root. Tras cada renovación, reinicia con `systemctl restart bifrost` (por ejemplo, desde un *deploy hook* de certbot). Los clientes no necesitan huella: marcan TLS y listo.
 - **Sin dominio** (certificado autofirmado): `sudo ./instalar.sh --modo publico --nombre-publico <IP o nombre>`. Al terminar se muestra la **huella SHA-256**; consúltala cuando quieras con `bifrost huella`.
   - En cada Asgard se escribe en `huella_tls` (opción `--huella` del instalador).
-  - En Midgard se puede pegar en «Huella TLS», o aceptar el aviso de confianza la primera vez, comparando la huella con la del servidor.
+  - Para Midgard, `bifrost cliente … --tls` la incluye en `servidor.json`. También se puede pegar en la vista avanzada («Huella TLS»), o aceptar el aviso de confianza la primera vez, comparando la huella con la del servidor.
 
 ## Cómo funciona
 
 - **Canales**: cada cliente abre un canal TCP de **control** (JSON) y otro de **medios** (cuadros JPEG). El audio va por **UDP** con cifrado ChaCha20-Poly1305 y una clave distinta por conexión. Si UDP no responde, el audio viaja por el canal de control, y Bifröst traduce entre ambos transportes cuando un cliente usa UDP y el otro TCP.
 - **Sin retraso acumulado**: para cada destino se guarda solo el último cuadro de video. Un cliente con red lenta recibe menos cuadros por segundo, pero siempre los más recientes.
+- **Acceso en dos pasos** (protocolo 2): Midgard primero inicia sesión (`auth`); sin eso no recibe listado ni puede abrir llamadas. Bifröst le entrega su lista filtrada por permisos y un *token* de usuario (12 h, se renueva con el uso) para reconectar sin la contraseña. Luego abre la llamada con el Asgard elegido (`open`).
 - **Compatibilidad**: el saludo incluye la versión del protocolo. Si Asgard, Midgard y Bifröst no coinciden, el cliente recibe un mensaje claro para actualizar. El audio se adapta entre mono y estéreo según los dispositivos de cada lado.
-- **Estabilidad**: pings cada 5 s, cierre de conexiones sin tráfico y reconexión automática de los clientes. Si un lado se cae, la sesión se conserva `--gracia` segundos (30 por defecto) y se reanuda al volver: Midgard con un *token* de reanudación y Asgard con sus credenciales.
+- **Estabilidad**: pings cada 5 s, cierre de conexiones sin tráfico y reconexión automática de los clientes. Si un lado se cae, la sesión se conserva `--gracia` segundos (30 por defecto) y se reanuda al volver: Midgard con su token de usuario y el de reanudación, y Asgard con sus credenciales. Un usuario desactivado pierde el acceso aunque tenga token.
 - **Una sesión por Asgard**: si otro usuario intenta entrar recibe «en sesión con otro usuario». Si el mismo usuario entra desde otra ventana, la sesión anterior se reemplaza.
 
 La referencia del protocolo está en `Comun/README.md`.
 
 ## Registros y diagnóstico
 
-- Servicio: `journalctl -u bifrost -f` y `sudo systemctl status bifrost`.
-- Archivo: `/var/lib/bifrost/bifrost.log` (rota a los 2 MB).
+- Servicio: `bifrost estado`, `bifrost monitor`, `journalctl -u bifrost -f` y `sudo systemctl status bifrost`.
+- Archivo: `/var/lib/bifrost/bifrost.log` (rota a los 2 MB) y el estado en `/var/lib/bifrost/estado.json`.
 - Más detalle: agrega `--registro debug` a la línea `ExecStart` de `/etc/systemd/system/bifrost.service`.
 
 | Problema | Solución |
 | --- | --- |
-| Midgard no ve el Asgard | Revisa en el Asgard que `dispositivo` y `secreto` coincidan (el registro dice «credenciales inválidas»). |
+| Midgard no ve el Asgard | El usuario necesita permiso (`bifrost permiso otorgar <usuario> <asgard>`); si aparece «Desconectado», revisa en el Asgard que `dispositivo` y `secreto` coincidan (el registro dice «credenciales inválidas»). |
 | «Usuario o contraseña incorrectos» repetido | Tras varios intentos se bloquea temporalmente esa IP y usuario; espera el tiempo indicado. |
-| «No tiene acceso a este Asgard» | `bifrost permiso otorgar <usuario> <asgard>` |
+| «Tu usuario no tiene acceso a este Asgard» | `bifrost permiso otorgar <usuario> <asgard>` |
+| La terminal quedó sin cursor tras cerrar Bifröst a la fuerza | Ejecuta `reset` (o `tput cnorm`). Con Ctrl+C o `systemctl stop` se restaura sola. |
 | Los clientes no conectan desde Internet | Abre 8765/TCP y 5004/UDP en el firewall y en el proveedor o el router; usa `--modo publico` con TLS en los clientes. |
 | El audio llega cortado | Si UDP está bloqueado el audio usa TCP y tolera peor la pérdida de paquetes: abre 5004/UDP. |
 
@@ -185,4 +224,4 @@ cd Bifröst
 python -m unittest discover -s tests -t .
 ```
 
-`protocolo.py` es una copia de `Comun/protocolo.py`: edita el original y ejecuta `python Comun/sincronizar.py`.
+`protocolo.py` es una copia de `Comun/protocolo.py`: edita el original y ejecuta `python Comun/sincronizar.py`. La consola en vivo está en `bifrost/consola.py`.

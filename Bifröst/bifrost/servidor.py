@@ -4,13 +4,15 @@
 Responsabilidades:
 
 * Autenticar Asgard (identificador + secreto) y usuarios de Midgard
-  (usuario + contraseña + permiso sobre el Asgard elegido) contra SQLite.
+  (usuario + contraseña) contra SQLite. El usuario inicia sesión primero y
+  luego ve solo los Asgard a los que tiene permiso.
 * Mantener el listado de Asgard: disponible, en sesión o desconectado.
 * Crear sesiones Midgard <-> Asgard y retransmitir entre ellos comandos,
   chat, telemetría, video, pantalla compartida y audio.
 * Conservar la sesión unos segundos si uno de los dos se desconecta, para que
-  se reanude sola al volver.
-* Responder consultas de descubrimiento en modo local.
+  se reanude sola al volver; el usuario recupera su acceso con un token.
+* Responder consultas de descubrimiento en modo local y publicar su estado
+  en ``estado.json`` (lo leen ``main.py estado`` y ``main.py monitor``).
 """
 
 from __future__ import annotations
@@ -18,15 +20,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import ssl
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
-from .base_datos import AsgardRecord, Database, UserRecord
+from . import __version__
+from .base_datos import AsgardRecord, Database, DatabaseError, UserRecord
 from .protocolo import (
     AUDIO,
     AUDIO_BLOCK_FRAMES,
@@ -43,6 +48,7 @@ from .protocolo import (
     HELLO,
     KEEPALIVE,
     KEEPALIVE_INTERVAL,
+    MAX_AVATAR_BYTES,
     MAX_CHAT_LENGTH,
     MAX_CONTROL_PACKET_SIZE,
     MAX_PACKET_SIZE,
@@ -106,6 +112,17 @@ class ServerConfig:
     control_idle_timeout: float = 30.0
     media_idle_timeout: float = 60.0
     max_connections_per_ip: int = 40
+    token_ttl: float = 12 * 3600.0      # vigencia del acceso de un usuario sin volver a escribir la contraseña
+    status_path: Path | None = None     # estado.json para 'main.py estado' y 'main.py monitor'
+    public_name: str = ""               # dominio público (para el archivo de conexión de Midgard)
+
+
+@dataclass
+class UserToken:
+    """Acceso de un usuario que ya escribió su contraseña (se renueva con el uso)."""
+
+    username: str
+    expires: float
 
 
 # --------------------------------------------------------------------------- #
@@ -252,8 +269,9 @@ class ControlChannel(Channel):
         self.device_id = ""
         self.record: AsgardRecord | None = None
         self.capabilities: dict[str, Any] = {}
-        # Midgard
+        # Midgard: usuario autenticado (None hasta que inicia sesión) y su token.
         self.user: UserRecord | None = None
+        self.user_token = ""
 
     def udp_usable(self, now: float) -> bool:
         return self.udp_addr is not None and self.udp_rx_ok and now - self.udp_last < UDP_FRESHNESS
@@ -343,6 +361,11 @@ class BifrostServer:
         self.sessions: dict[str, Session] = {}
         self.media_tokens: dict[str, ControlChannel] = {}
         self.audio_channels: dict[int, ControlChannel] = {}
+        self.user_tokens: dict[str, UserToken] = {}
+        self.started = time.time()
+        self.running = False
+        self._tcp_port = 0
+        self._audio_port = 0
         public = config.mode == MODE_PUBLIC
         self.throttle = LoginThrottle(
             max_failures=5 if public else 10,
@@ -386,18 +409,23 @@ class BifrostServer:
                 )
             except OSError as error:
                 log.warning("No se pudo activar el descubrimiento en UDP %s: %s", self.config.discovery_port, error)
+        self.running = True
+        self.started = time.time()
         self._tasks.append(asyncio.create_task(self._housekeeping()))
 
     @property
     def tcp_port(self) -> int:
-        assert self._tcp_server is not None
-        return int(self._tcp_server.sockets[0].getsockname()[1])
+        if self._tcp_server is None or not self._tcp_server.sockets:
+            return self._tcp_port or self.config.port
+        self._tcp_port = int(self._tcp_server.sockets[0].getsockname()[1])
+        return self._tcp_port
 
     @property
     def audio_port(self) -> int:
-        if self._udp_transport is None:
-            return self.config.audio_port
-        return int(self._udp_transport.get_extra_info("sockname")[1])
+        address = self._udp_transport.get_extra_info("sockname") if self._udp_transport is not None else None
+        if address:
+            self._audio_port = int(address[1])
+        return self._audio_port or self.config.audio_port
 
     @property
     def discovery_port(self) -> int | None:
@@ -410,6 +438,7 @@ class BifrostServer:
         await self._tcp_server.serve_forever()
 
     async def stop(self) -> None:
+        self.running = False
         for session in list(self.sessions.values()):
             self._end_session(session, "server_shutdown")
         goodbye = encode_packet(REJECT, {"code": "shutdown", "message": "El servidor se está apagando."})
@@ -436,6 +465,7 @@ class BifrostServer:
                 await asyncio.wait_for(self._tcp_server.wait_closed(), 3)
             except (asyncio.TimeoutError, Exception):
                 pass
+        await self._write_status()
         self._db_executor.shutdown(wait=True)
 
     def discovery_info(self) -> dict[str, Any]:
@@ -454,12 +484,48 @@ class BifrostServer:
         return {
             "asgards": sorted(self.asgards),
             "midgards": len(self.midgards),
+            "users": sorted({c.user.username for c in self.midgards if c.user is not None}),
             "sessions": [
                 {"id": s.id, "asgard": s.device_id, "user": s.user.username, "linked": s.linked}
                 for s in self.sessions.values()
             ],
             "stats": dict(self.stats),
         }
+
+    def status(self) -> dict[str, Any]:
+        """Resumen para la consola en vivo y para estado.json."""
+        return {
+            "version": __version__,
+            "pid": os.getpid(),
+            "name": self.config.name,
+            "mode": self.config.mode,
+            "host": self.config.host,
+            "tcp_port": self.tcp_port,
+            "audio_port": self.audio_port,
+            "tls": self.config.ssl_context is not None,
+            "fingerprint": self.config.tls_fingerprint,
+            "public_name": self.config.public_name,
+            "started": self.started,
+            "updated": time.time(),
+            "running": self.running,
+            **self.snapshot(),
+        }
+
+    async def _write_status(self) -> None:
+        path = self.config.status_path
+        if path is None:
+            return
+        data = json.dumps(self.status(), ensure_ascii=False, indent=2)
+
+        def write() -> None:
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(data, encoding="utf-8")
+            os.replace(temporary, path)
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, write)
+        except OSError as error:
+            log.debug("No se pudo escribir %s: %s", path, error)
 
     # -- base de datos -------------------------------------------------------- #
     async def _db(self, function: Callable[..., Any], *args: Any) -> Any:
@@ -666,6 +732,13 @@ class BifrostServer:
     ) -> None:
         channel = ControlChannel(reader, writer, ROLE_MIDGARD)
         channel.software = str(meta.get("software", ""))[:64]
+        # El token de usuario permite recuperar el acceso tras un corte sin volver a pedir la contraseña.
+        user_token = meta.get("token")
+        if isinstance(user_token, str) and user_token:
+            user = await self._user_from_token(user_token)
+            if user is not None:
+                channel.user = user
+                channel.user_token = user_token
         self._register_channel(channel)
         self.midgards.add(channel)
         welcome = self._welcome(channel)
@@ -673,13 +746,17 @@ class BifrostServer:
         token = meta.get("resume")
         if isinstance(token, str) and token:
             session = self._find_resumable(token)
-            if session is not None:
+            if session is not None and (channel.user is None or channel.user.id == session.user.id):
                 self._attach_midgard(session, channel)
                 resumed = self._session_info(session)
         welcome["resumed"] = resumed
+        welcome["auth"] = self._user_payload(channel.user) if channel.user is not None else None
         channel.start_sender()
         channel.send_packet(encode_packet(WELCOME, welcome))
-        log.info("Midgard conectado desde %s%s", channel.address, " - sesión reanudada" if resumed else "")
+        log.info("Midgard conectado desde %s%s%s", channel.address,
+                 f" ({channel.user.username})" if channel.user else "", " - sesión reanudada" if resumed else "")
+        if channel.user is not None and channel.session is None:
+            channel.send_control(await self._asgard_list(channel.user))
         try:
             await self._read_control(channel)
         finally:
@@ -711,6 +788,39 @@ class BifrostServer:
     def _user_info(user: UserRecord) -> dict[str, Any]:
         return {"name": user.username, "display": user.display_name}
 
+    @staticmethod
+    def _user_payload(user: UserRecord) -> dict[str, Any]:
+        return {
+            "name": user.username,
+            "display": user.display_name,
+            "admin": user.is_admin,
+            "full_access": user.full_access or user.is_admin,
+            "last_login": user.last_login,
+            "created": user.created,
+        }
+
+    def _new_user_token(self, user: UserRecord) -> str:
+        token = secrets.token_urlsafe(32)
+        self.user_tokens[token] = UserToken(user.username, time.monotonic() + self.config.token_ttl)
+        return token
+
+    async def _user_from_token(self, token: str) -> UserRecord | None:
+        entry = next((v for k, v in self.user_tokens.items() if secrets.compare_digest(k, token)), None)
+        if entry is None or entry.expires < time.monotonic():
+            self.user_tokens.pop(token, None)
+            return None
+        user = await self._db(self.db.get_user, entry.username)
+        if user is None or not user.active:
+            self.user_tokens.pop(token, None)
+            return None
+        entry.expires = time.monotonic() + self.config.token_ttl
+        return user
+
+    def _drop_user_tokens(self, username: str, keep: str = "") -> None:
+        for token, entry in list(self.user_tokens.items()):
+            if entry.username.lower() == username.lower() and token != keep:
+                del self.user_tokens[token]
+
     def _session_info(self, session: Session) -> dict[str, Any]:
         asgard = session.asgard
         record = asgard.record if asgard is not None else None
@@ -731,32 +841,34 @@ class BifrostServer:
         }
 
     @staticmethod
-    def _login_error(code: str, message: str) -> dict[str, Any]:
-        return {"op": "login_error", "code": code, "message": message}
+    def _auth_error(code: str, message: str) -> dict[str, Any]:
+        return {"op": "auth_error", "code": code, "message": message}
 
-    async def _login(self, channel: ControlChannel, meta: dict[str, Any]) -> None:
+    @staticmethod
+    def _session_error(code: str, message: str) -> dict[str, Any]:
+        return {"op": "session_error", "code": code, "message": message}
+
+    async def _auth(self, channel: ControlChannel, meta: dict[str, Any]) -> None:
+        """Inicio de sesión del usuario (antes de elegir el Asgard)."""
         if channel.session is not None:
-            channel.send_control(self._login_error("already", "Ya tienes una sesión abierta; ciérrala primero."))
+            channel.send_control(self._auth_error("already", "Cierra la llamada antes de cambiar de usuario."))
             return
-        device_id = meta.get("asgard")
         username = meta.get("user")
         password = meta.get("password")
         if (
-            not is_identifier(device_id)
-            or not isinstance(username, str)
+            not isinstance(username, str)
             or not isinstance(password, str)
             or not username.strip()
+            or not password
             or len(username) > 64
             or len(password) > 256
         ):
-            channel.send_control(self._login_error("invalid", "Selecciona un Asgard y escribe usuario y contraseña."))
+            channel.send_control(self._auth_error("invalid", "Escribe tu usuario y tu contraseña."))
             return
         username = username.strip()
         wait = self.throttle.retry_after(channel.address, username)
         if wait > 0:
-            channel.send_control(
-                self._login_error("throttled", f"Demasiados intentos fallidos. Espera {int(wait) + 1} s.")
-            )
+            channel.send_control(self._auth_error("throttled", f"Demasiados intentos fallidos. Espera {int(wait) + 1} s."))
             return
         user = await self._db(self.db.authenticate_user, username, password)
         if channel.closed:
@@ -764,28 +876,101 @@ class BifrostServer:
         if user is None:
             self.throttle.failure(channel.address, username)
             log.warning("Acceso fallido del usuario %r desde %s", username, channel.address)
-            channel.send_control(self._login_error("credentials", "Usuario o contraseña incorrectos."))
+            channel.send_control(self._auth_error("credentials", "Usuario o contraseña incorrectos."))
             return
         self.throttle.success(channel.address, username)
-        allowed = await self._db(self.db.has_permission, user, device_id)
+        if channel.session is not None:
+            return
+        if channel.user_token:
+            self.user_tokens.pop(channel.user_token, None)
+        channel.user = user
+        channel.user_token = self._new_user_token(user)
+        channel.send_control({
+            "op": "auth_ok",
+            "user": self._user_payload(user),
+            "token": channel.user_token,
+            "ttl": self.config.token_ttl,
+        })
+        channel.send_control(await self._asgard_list(user))
+        log.info("Usuario %s inició sesión desde %s", user.username, channel.address)
+
+    def _signout(self, channel: ControlChannel) -> None:
+        if channel.session is not None:
+            self._end_session(channel.session, "logout")
+        if channel.user is not None:
+            log.info("Usuario %s cerró su sesión", channel.user.username)
+        self.user_tokens.pop(channel.user_token, None)
+        channel.user = None
+        channel.user_token = ""
+        channel.send_control({"op": "signed_out"})
+
+    async def _change_password(self, channel: ControlChannel, meta: dict[str, Any]) -> None:
+        assert channel.user is not None
+        username = channel.user.username
+        old, new = meta.get("old"), meta.get("new")
+        if not isinstance(old, str) or not isinstance(new, str) or not old or len(old) > 256 or len(new) > 256:
+            channel.send_control({"op": "password_error", "message": "Escribe la contraseña actual y la nueva."})
+            return
+        wait = self.throttle.retry_after(channel.address, username)
+        if wait > 0:
+            channel.send_control({"op": "password_error", "message": f"Demasiados intentos. Espera {int(wait) + 1} s."})
+            return
+        user = await self._db(self.db.authenticate_user, username, old)
+        if user is None:
+            self.throttle.failure(channel.address, username)
+            channel.send_control({"op": "password_error", "message": "La contraseña actual no es correcta."})
+            return
+        try:
+            await self._db(self.db.set_password, username, new)
+        except DatabaseError as error:
+            channel.send_control({"op": "password_error", "message": str(error)})
+            return
+        self._drop_user_tokens(username, keep=channel.user_token)
+        channel.send_control({"op": "password_ok"})
+        log.info("El usuario %s cambió su contraseña", username)
+
+    async def _history(self, channel: ControlChannel) -> None:
+        assert channel.user is not None
+        records = await self._db(self.db.recent_sessions, 10, channel.user.username)
+        names = {r.device_id: r.name for r in await self._db(self.db.list_asgards)}
+        channel.send_control({
+            "op": "history",
+            "items": [
+                {"asgard": r.device_id, "name": names.get(r.device_id, r.device_id), "start": r.started,
+                 "end": r.ended, "reason": r.reason}
+                for r in records
+            ],
+        })
+
+    async def _open(self, channel: ControlChannel, meta: dict[str, Any]) -> None:
+        """Abre la llamada con el Asgard elegido por un usuario ya autenticado."""
+        user = channel.user
+        assert user is not None
+        if channel.session is not None:
+            channel.send_control(self._session_error("already", "Ya estás en una llamada; ciérrala primero."))
+            return
+        device_id = meta.get("asgard")
+        if not is_identifier(device_id):
+            channel.send_control(self._session_error("invalid", "Selecciona un Asgard de la lista."))
+            return
+        allowed = await self._db(self.db.allowed_devices, user)
         if channel.closed:
             return
-        if not allowed:
+        if allowed is not None and device_id not in allowed:
             log.warning("El usuario %s no tiene permiso sobre %s", user.username, device_id)
-            channel.send_control(self._login_error("permission", "Tu usuario no tiene acceso a este Asgard."))
+            channel.send_control(self._session_error("permission", "Tu usuario no tiene acceso a este Asgard."))
             return
         # A partir de aquí no hay esperas: nada cambia entre la comprobación y el enlace.
-        if channel.session is not None:
-            channel.send_control(self._login_error("already", "Ya tienes una sesión abierta; ciérrala primero."))
+        if channel.session is not None or channel.user is not user:
             return
         asgard = self.asgards.get(device_id)
         if asgard is None or asgard.closed:
-            channel.send_control(self._login_error("offline", "El Asgard seleccionado no está conectado."))
+            channel.send_control(self._session_error("offline", "El Asgard seleccionado no está conectado."))
             return
         existing = self._session_for_device(device_id)
         if existing is not None:
             if existing.user.id != user.id:
-                channel.send_control(self._login_error("busy", "El Asgard está en sesión con otro usuario."))
+                channel.send_control(self._session_error("busy", "El Asgard está en sesión con otro usuario."))
                 return
             self._end_session(existing, "replaced")
         session = Session(
@@ -799,12 +984,11 @@ class BifrostServer:
         )
         asgard.session = session
         channel.session = session
-        channel.user = user
         self.sessions[session.id] = session
         asgard.send_control(
             {"op": "session_start", "session": session.id, "user": self._user_info(user), "resumed": False}
         )
-        channel.send_control({"op": "login_ok", **self._session_info(session)})
+        channel.send_control({"op": "session_ok", **self._session_info(session)})
         self._spawn_db(self.db.start_session, session.id, user.username, device_id, channel.address)
         log.info("Sesión %s iniciada: %s -> %s", session.id, user.username, device_id)
         self._lobby_changed()
@@ -860,15 +1044,28 @@ class BifrostServer:
             else:
                 channel.send_control({"op": "error", "message": f"Operación desconocida: {op}"})
             return
+        if op == "auth":
+            await self._auth(channel, meta)
+            return
+        if channel.user is None:
+            channel.send_control({"op": "error", "code": "auth_required", "message": "Inicia sesión primero."})
+            return
         if op == "list":
-            channel.send_control(await self._asgard_list())
-        elif op == "login":
-            await self._login(channel, meta)
+            channel.send_control(await self._asgard_list(channel.user))
+        elif op == "open":
+            await self._open(channel, meta)
         elif op == "logout":
+            # Termina la llamada; el usuario sigue con su sesión abierta y vuelve al listado.
             if channel.session is not None:
                 self._end_session(channel.session, "logout")
             else:
                 channel.send_control({"op": "session_end", "reason": "logout"})
+        elif op == "signout":
+            self._signout(channel)
+        elif op == "password":
+            await self._change_password(channel, meta)
+        elif op == "history":
+            await self._history(channel)
         elif op == "cmd":
             self._forward_command(channel, meta)
         else:
@@ -896,6 +1093,10 @@ class BifrostServer:
             )
             return
         message = dict(meta)
+        if command == "avatar":
+            image = meta.get("image")
+            if not isinstance(image, str) or len(image) > MAX_AVATAR_BYTES * 4 // 3 + 8:
+                raise ProtocolError("La foto de perfil es demasiado grande.")
         if command == "chat":
             text = clean_text(meta.get("text"), "El mensaje", MAX_CHAT_LENGTH, multiline=True)
             message = {
@@ -909,11 +1110,14 @@ class BifrostServer:
             }
         asgard.send_control(message)
 
-    async def _asgard_list(self) -> dict[str, Any]:
-        records = await self._db(self.db.list_asgards)
+    async def _asgard_list(self, user: UserRecord, records: list[AsgardRecord] | None = None) -> dict[str, Any]:
+        """Asgard que el usuario puede usar (todos si es administrador o tiene acceso total)."""
+        if records is None:
+            records = await self._db(self.db.list_asgards)
+        allowed = await self._db(self.db.allowed_devices, user)
         items = []
         for record in records:
-            if not record.active:
+            if not record.active or (allowed is not None and record.device_id not in allowed):
                 continue
             channel = self.asgards.get(record.device_id)
             online = channel is not None and not channel.closed
@@ -945,10 +1149,16 @@ class BifrostServer:
             while self._lobby_dirty:
                 await asyncio.sleep(0.25)
                 self._lobby_dirty = False
-                listing = await self._asgard_list()
+                records = await self._db(self.db.list_asgards)
+                listings: dict[str, dict[str, Any]] = {}
                 for channel in list(self.midgards):
-                    if channel.session is None and not channel.closed:
-                        channel.send_control(listing)
+                    user = channel.user
+                    if user is None or channel.session is not None or channel.closed:
+                        continue
+                    key = user.username.lower()
+                    if key not in listings:
+                        listings[key] = await self._asgard_list(user, records)
+                    channel.send_control(listings[key])
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1054,8 +1264,10 @@ class BifrostServer:
 
     # -- mantenimiento ------------------------------------------------------------ #
     async def _housekeeping(self) -> None:
+        ticks = 0
         while True:
             await asyncio.sleep(1.0)
+            ticks += 1
             now = time.monotonic()
             for session in list(self.sessions.values()):
                 if session.linked:
@@ -1064,4 +1276,9 @@ class BifrostServer:
                     session.grace_deadline = now + self.config.grace_seconds
                 elif now >= session.grace_deadline:
                     self._end_session(session, "timeout")
+            for token, entry in list(self.user_tokens.items()):
+                if entry.expires < now:
+                    del self.user_tokens[token]
             self.throttle.cleanup()
+            if ticks % 3 == 1:
+                await self._write_status()

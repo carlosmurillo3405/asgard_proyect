@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import logging
 import logging.handlers
+import os
 import shutil
 import signal
 import sys
@@ -226,46 +227,66 @@ def run(args: argparse.Namespace) -> int:
 
     mode = "ninguna" if args.sin_pantalla else ("ventana" if args.ventana else config.screen.mode)
     use_audio = not args.sin_audio
-    if mode == "ninguna":
+    reason = "" if mode == "ninguna" else _screen_unavailable()
+    if mode == "ninguna" or reason:
+        if reason:
+            log.warning("%s Se continúa sin pantalla.", reason)
         app = AsgardApp(config, simulate=args.simulacion, use_audio_devices=use_audio)
         signal.signal(signal.SIGTERM, _raise_interrupt)
         app.run_forever()
         return 0
+    return run_with_screen(config, args, mode, use_audio)
 
-    import tkinter as tk
 
+def _screen_unavailable() -> str:
+    """Motivo por el que no se puede abrir la pantalla del aula (vacío si se puede)."""
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or os.environ.get("QT_QPA_PLATFORM")
+    ):
+        return "No hay sesión gráfica (DISPLAY/WAYLAND_DISPLAY)."
     try:
-        root = tk.Tk()
-    except tk.TclError as error:
-        log.warning("No hay pantalla disponible (%s); se continúa sin ventana.", error)
-        app = AsgardApp(config, simulate=args.simulacion, use_audio_devices=use_audio)
-        app.run_forever()
-        return 0
+        from asgard import qt  # noqa: F401
+    except ImportError as error:
+        return f"No está instalada la biblioteca Qt ({error})."
+    return ""
 
-    from asgard.pantalla import AsgardScreen
 
-    app_holder: dict[str, object] = {}
+def run_with_screen(config: object, args: argparse.Namespace, mode: str, use_audio: bool) -> int:
+    from asgard import tema
+    from asgard.aplicacion import AsgardApp
+    from asgard.pantalla_aula import AsgardScreen
+    from asgard.qt import QtCore, QtWidgets, exec_, prepare_application
+
+    prepare_application()
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    qt_app.setApplicationName("Asgard")
+    tema.aplicar_tema(qt_app)
+    holder: dict[str, AsgardApp] = {}
 
     def close() -> None:
-        app = app_holder.get("app")
+        app = holder.get("app")
         if app is not None:
-            app.stop()  # type: ignore[attr-defined]
-        try:
-            root.destroy()
-        except tk.TclError:
-            pass
+            app.stop()
+        qt_app.quit()
 
-    screen = AsgardScreen(root, config.bifrost.device, fullscreen=mode == "completa",
-                          chat_font_size=config.screen.chat_font_size, on_close=close)
-    app = AsgardApp(config, simulate=args.simulacion, screen=screen, use_audio_devices=use_audio)
-    app_holder["app"] = app
-    signal.signal(signal.SIGTERM, lambda *_: root.after(0, close))
+    screen = AsgardScreen(config.bifrost.device, fullscreen=mode == "completa",  # type: ignore[attr-defined]
+                          chat_font_size=config.screen.chat_font_size, on_close=close,  # type: ignore[attr-defined]
+                          show_status=config.screen.diagnostics)  # type: ignore[attr-defined]
+    app = AsgardApp(config, simulate=args.simulacion, screen=screen, use_audio_devices=use_audio)  # type: ignore[arg-type]
+    holder["app"] = app
+
+    def request_close(*_args: object) -> None:
+        QtCore.QTimer.singleShot(0, lambda: QtWidgets.QMainWindow.close(screen))
+
+    # systemd detiene con SIGTERM; el temporizador deja que Python atienda la señal dentro del bucle de Qt.
+    signal.signal(signal.SIGTERM, request_close)
+    signal.signal(signal.SIGINT, request_close)
+    heartbeat = QtCore.QTimer()
+    heartbeat.timeout.connect(lambda: None)
+    heartbeat.start(400)
+    screen.mostrar()
     app.start()
-    try:
-        root.mainloop()
-    except KeyboardInterrupt:
-        close()
-    return 0
+    return exec_(qt_app)
 
 
 def check_installation(config_path: Path) -> int:
@@ -273,13 +294,13 @@ def check_installation(config_path: Path) -> int:
     required = [
         ("OpenCV", "import cv2"),
         ("NumPy", "import numpy"),
-        ("Pillow", "from PIL import ImageTk"),
+        ("Pillow", "import PIL.Image"),
         ("Audio (sounddevice/PortAudio)", "import sounddevice; sounddevice.query_devices()"),
         ("Cifrado (cryptography)", "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
         ("Asgard", "import asgard.aplicacion"),
     ]
     optional = [
-        ("Pantalla (Tkinter)", "import tkinter; tkinter.Tcl()"),
+        ("Pantalla del aula (Qt)", "from asgard import qt; detalle = qt.description()"),
         ("IA (MediaPipe)", "import mediapipe"),
         ("Servos por GPIO (gpiozero)", "import gpiozero"),
         ("Servos por I2C (PCA9685)", "import adafruit_servokit"),
@@ -288,9 +309,11 @@ def check_installation(config_path: Path) -> int:
     problems = 0
     for group, items in (("obligatorio", required), ("opcional", optional)):
         for label, statement in items:
+            namespace: dict[str, object] = {}
             try:
-                exec(statement, {})
-                print(f"  OK     {label}")
+                exec(statement, namespace)
+                detail = namespace.get("detalle")
+                print(f"  OK     {label}" + (f": {detail}" if detail else ""))
             except Exception as error:  # se informa cualquier fallo de importación
                 print(f"  {'FALLA ' if group == 'obligatorio' else 'falta '} {label}: {error}")
                 problems += group == "obligatorio"
