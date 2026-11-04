@@ -6,9 +6,14 @@ Abre las ventanas verdaderas de Midgard y de la pantalla del aula de Asgard,
 pero el servidor Bifröst y el aula son simulados dentro de este programa: no
 hace falta red, servidor, Raspberry Pi, cámara del aula, servos ni mano.
 
-    python probar_ventanas.py            # ambas ventanas, conectadas entre sí
-    python probar_ventanas.py midgard    # solo Midgard
-    python probar_ventanas.py asgard     # solo la pantalla del aula (con un guion automático)
+    probar_ventanas.bat [modo]           # Windows (doble clic)
+    bash probar_ventanas.sh [modo]       # Linux y macOS
+    python probar_ventanas.py [modo]     # con el Python del entorno de la raíz
+
+    modo: ambas (predeterminado, conectadas entre sí), midgard o asgard
+          (solo la pantalla del aula, con un guion automático)
+
+Los lanzadores usan el entorno .venv de la raíz y lo preparan solos si falta.
 
 En Midgard sirve cualquier usuario y contraseña (la contraseña «error» muestra
 el rechazo). «Aula 1» abre la llamada; «Aula 2» está ocupada y «Laboratorio 3»
@@ -31,8 +36,7 @@ DEMO = Path(__file__).resolve().parent
 RAIZ = DEMO.parent
 DATOS = DEMO / "datos"
 DATOS.mkdir(exist_ok=True)
-os.environ["APPDATA"] = str(DATOS)            # Windows: ajustes de Midgard aislados
-os.environ["XDG_CONFIG_HOME"] = str(DATOS)    # Linux
+os.environ["MIDGARD_AJUSTES"] = str(DATOS / "Midgard")   # ajustes aislados en Windows, Linux y macOS
 sys.path.insert(0, str(RAIZ / "Midgard"))
 sys.path.insert(0, str(RAIZ / "Asgard" / "Software"))
 

@@ -3,7 +3,9 @@
 
 Se guardan en la carpeta de configuración del usuario (``%APPDATA%\\Midgard``
 en Windows, ``~/Library/Application Support/Midgard`` en macOS y
-``~/.config/midgard`` en Linux). Nunca se guarda la contraseña.
+``~/.config/midgard`` en Linux), o en la carpeta que indique la variable de
+entorno ``MIDGARD_AJUSTES`` (la usa la demostración para no tocar los ajustes
+reales). Nunca se guarda la contraseña.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ log = logging.getLogger(__name__)
 
 
 def config_dir() -> Path:
+    if os.environ.get("MIDGARD_AJUSTES"):
+        return Path(os.environ["MIDGARD_AJUSTES"])
     system = platform.system()
     if system == "Windows":
         return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Midgard"

@@ -72,7 +72,14 @@ Los instaladores de cada programa (`Asgard/Software/instalar.sh`, `Bifrost/insta
 
 ### Ver solo las ventanas (demostración)
 
-Doble clic en `Demo/probar_ventanas.bat`, o `.venv\Scripts\python Demo\probar_ventanas.py [ambas|midgard|asgard]`. Abre las ventanas verdaderas de Midgard y de la pantalla del aula con un servidor y un aula simulados dentro del mismo programa: no usa red, servidor ni hardware. Sirve cualquier usuario y contraseña (la contraseña «error» muestra el rechazo); «Aula 1» abre la llamada. Los ajustes de la demostración se guardan en `Demo/datos/`.
+| Sistema | Cómo abrirla |
+| --- | --- |
+| Windows | Doble clic en `Demo/probar_ventanas.bat` |
+| Linux y macOS | `bash Demo/probar_ventanas.sh` en una terminal, desde la raíz del repositorio |
+
+Los dos aceptan `ambas` (predeterminado), `midgard` o `asgard`, y si falta el entorno de la raíz lo preparan solos la primera vez. Abren las ventanas verdaderas de Midgard y de la pantalla del aula con un servidor y un aula simulados dentro del mismo programa: no usa red, servidor ni hardware. Sirve cualquier usuario y contraseña (la contraseña «error» muestra el rechazo); «Aula 1» abre la llamada. Los ajustes de la demostración se guardan en `Demo/datos/`, nunca en los ajustes reales de Midgard.
+
+En Linux, Qt necesita `libxcb-cursor0` (Debian/Ubuntu: `sudo apt install libxcb-cursor0`; Fedora: `xcb-util-cursor`) y el audio `libportaudio2`. En macOS usa un Python 3.10+ de [python.org](https://www.python.org/downloads/) o de Homebrew: el que trae el sistema es 3.9.
 
 ### Probar el sistema completo (sin hardware)
 

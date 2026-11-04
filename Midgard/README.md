@@ -129,7 +129,7 @@ Se recuerdan entre usos: servidor, usuario, vista, dispositivos, calidades, pane
 | macOS | `~/Library/Application Support/Midgard` |
 | Linux | `~/.config/midgard` |
 
-En la misma carpeta están el registro `midgard.log` y la carpeta `fotos`.
+En la misma carpeta están el registro `midgard.log` y la carpeta `fotos`. Para usar otra carpeta (pruebas o una copia portátil), define la variable de entorno `MIDGARD_AJUSTES` con su ruta; así lo hace la demostración.
 
 ## Reconexión
 
