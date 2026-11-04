@@ -1,10 +1,12 @@
-# Hardware de Asgard
+# Asgard hardware
 
-Modelos 3D de la carcasa del equipo del aula.
+**English** · [Español](README.es.md)
 
-| Archivo | Contenido |
+3D models of the classroom device's case.
+
+| File | Contents |
 | --- | --- |
-| `BIFROST.skp` | Modelo de la carcasa (SketchUp) |
-| `BIFROST tapa.zip` | Piezas para imprimir en 3D: `BIFROST cuerpo.stl` y `BIFROST tapa.stl` |
+| `BIFROST.skp` | Case model (SketchUp) |
+| `BIFROST-parts.zip` | Parts to 3D print: `BIFROST-body.stl` and `BIFROST-lid.stl` |
 
-El cableado de los servos, la fuente y el ESP32 está en la [guía de Asgard](../Software/README.md#conexión-con-esp32-recomendada) y el firmware en [Firmware](../Firmware/README.md).
+The wiring of the servos, the power supply and the ESP32 is in the [Asgard guide](../Software/README.md#esp32-wiring-recommended) and the firmware in [Firmware](../Firmware/README.md).

@@ -7,9 +7,9 @@
   Raspberry esté ocupada con la IA y el video, que es lo que hace temblar o
   «volverse locos» a los servos cuando el PWM se genera por software.
 
-    include/configuracion.h   pines, versión y límites
+    include/config.h          pines, versión y límites
     src/servos.cpp            señal PWM de cada canal (0 = pan, 1 = tilt, 2 = mano)
-    src/protocolo.cpp         órdenes por el puerto serie y perro guardián
+    src/protocol.cpp          órdenes por el puerto serie y perro guardián
 
   Arranca sin pulsos (los servos no saltan al encender), suelta los servos si
   la Raspberry deja de hablar y avisa si se reinició por caída de voltaje.
@@ -18,17 +18,17 @@
 
 #include <Arduino.h>
 
-#include "configuracion.h"
-#include "protocolo.h"
+#include "config.h"
+#include "protocol.h"
 #include "servos.h"
 
 void setup() {
-  Serial.begin(BAUDIOS);
-  servos::iniciar();
-  protocolo::iniciar(Serial);
+  Serial.begin(BAUD_RATE);
+  servos::begin();
+  protocol::begin(Serial);
 }
 
 void loop() {
-  protocolo::atender();
+  protocol::serve();
   delay(1);
 }

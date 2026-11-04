@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Acceso a Qt sin depender de una biblioteca concreta.
+"""Access to Qt without depending on a specific binding.
 
-Orden de preferencia: PySide6 (Windows, macOS y Linux de escritorio, con pip),
-PyQt6 y PyQt5 (en Raspberry Pi OS vienen con apt: ``python3-pyqt6`` o
-``python3-pyqt5``). La variable de entorno ``SISTEMA_ASGARD_QT`` (pyside6,
-pyqt6 o pyqt5) obliga a usar una.
+Order of preference: PySide6 (Windows, macOS and desktop Linux, with pip),
+PyQt6 and PyQt5 (on Raspberry Pi OS they come with apt: ``python3-pyqt6`` or
+``python3-pyqt5``). The ``ASGARD_QT`` environment variable (pyside6, pyqt6 or
+pyqt5) forces one of them.
 
-El resto del código usa siempre la forma completa de los enumerados
-(``QtCore.Qt.AlignmentFlag.AlignCenter``), válida en las tres bibliotecas.
+The rest of the code always uses the fully scoped enums
+(``QtCore.Qt.AlignmentFlag.AlignCenter``), which work in all three bindings.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import os
 from typing import Any
 
 _ORDER = ("pyside6", "pyqt6", "pyqt5")
-_forced = os.environ.get("SISTEMA_ASGARD_QT", "").strip().lower()
+_forced = os.environ.get("ASGARD_QT", "").strip().lower()
 _errors: list[str] = []
 
 API = ""
@@ -43,10 +43,13 @@ for _name in ((_forced,) if _forced in _ORDER else _ORDER):
         _errors.append(f"{_name}: {_error}")
 
 if not API:
-    raise ImportError(
-        "No hay una biblioteca de Qt instalada (PySide6, PyQt6 o PyQt5). "
-        "Instala PySide6-Essentials con pip o python3-pyqt6 con apt. Detalle: " + "; ".join(_errors)
-    )
+    from .i18n import tr
+
+    raise ImportError(tr(
+        "No Qt binding is installed (PySide6, PyQt6 or PyQt5). "
+        "Install PySide6-Essentials with pip or python3-pyqt6 with apt. Details: {details}",
+        details="; ".join(_errors),
+    ))
 
 QT6 = API != "pyqt5"
 QAction = QtGui.QAction if QT6 else QtWidgets.QAction  # type: ignore[attr-defined]
@@ -54,13 +57,13 @@ QShortcut = QtGui.QShortcut if QT6 else QtWidgets.QShortcut  # type: ignore[attr
 
 
 def exec_(obj: Any) -> int:
-    """``exec()`` de Qt 6 o ``exec_()`` de PyQt5."""
+    """Qt 6 ``exec()`` or PyQt5 ``exec_()``."""
     method = getattr(obj, "exec", None) or getattr(obj, "exec_")
     return int(method() or 0)
 
 
 def event_pos(event: Any) -> QtCore.QPointF:
-    """Posición local de un evento de ratón como ``QPointF``."""
+    """Local position of a mouse event as a ``QPointF``."""
     position = getattr(event, "position", None)
     if position is not None:
         return position()
@@ -68,7 +71,7 @@ def event_pos(event: Any) -> QtCore.QPointF:
 
 
 def wheel_steps(event: Any) -> float:
-    """Pasos de la rueda del ratón (positivo hacia arriba)."""
+    """Mouse wheel steps (positive upwards)."""
     return event.angleDelta().y() / 120.0
 
 
@@ -78,7 +81,7 @@ def device_pixel_ratio(widget: Any) -> float:
 
 
 def prepare_application() -> None:
-    """Ajustes que deben hacerse antes de crear ``QApplication``."""
+    """Settings that must be applied before creating ``QApplication``."""
     if not QT6:
         QtWidgets.QApplication.setAttribute(QtCore.Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
         QtWidgets.QApplication.setAttribute(QtCore.Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)

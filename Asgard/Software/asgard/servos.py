@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Servomotores Pan/Tilt de la cámara de Asgard.
+"""Pan/tilt servomotors of the Asgard camera.
 
-Controladores gpiozero (GPIO directo, con pigpio si está disponible), PCA9685
-por I2C o un ESP32 por USB (``esp32.py``), y un hilo que mueve los servos hacia
-el objetivo con velocidad limitada para evitar tirones.
+Drivers: gpiozero (direct GPIO, with pigpio when available), PCA9685 over I2C
+or an ESP32 over USB (``esp32.py``), plus a thread that moves the servos
+towards the target at a limited speed to avoid jerks.
 
-Convención: pan sube = la cámara gira a la derecha; tilt sube = la cámara mira
-hacia arriba. Si el montaje es al revés, usa ``invertir_pan``/``invertir_tilt``.
+Convention: increasing pan = the camera turns right; increasing tilt = the
+camera looks up. If the mount is reversed, use ``invert_pan``/``invert_tilt``.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ import threading
 import time
 from typing import Any
 
+from .i18n import tr
+
 log = logging.getLogger(__name__)
 
 
@@ -24,17 +26,18 @@ def clamp(value: float, low: float, high: float) -> float:
 
 
 def pulse_us(angle: float, min_pulse_us: int, max_pulse_us: int) -> int:
-    """Ancho de pulso (µs) para un ángulo de 0 a 180°."""
+    """Pulse width (µs) for an angle from 0 to 180°."""
     return round(min_pulse_us + (max_pulse_us - min_pulse_us) * clamp(angle, 0, 180) / 180)
 
 
 class SimBackend:
-    """Servos simulados: registra el último ángulo pedido."""
+    """Simulated servos: records the last requested angle."""
 
     simulated = True
+    software_pwm = False
 
-    def __init__(self, name: str = "simulación (sin servos)") -> None:
-        self.name = name
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name or tr("simulation (no servos)")
         self.last: tuple[float, float] | None = None
         self.detached = False
 
@@ -56,7 +59,7 @@ _pin_factory_name = ""
 
 
 def get_servokit() -> Any:
-    """Instancia única de ServoKit (servos y mano comparten el mismo PCA9685)."""
+    """Single ServoKit instance (servos and hand share the same PCA9685)."""
     global _servokit
     with _shared_lock:
         if _servokit is None:
@@ -67,7 +70,7 @@ def get_servokit() -> Any:
 
 
 def get_pin_factory() -> tuple[Any, str]:
-    """Usa pigpio si su demonio está activo (PWM por hardware, menos temblor)."""
+    """Uses pigpio when its daemon is running (hardware PWM, less jitter)."""
     global _pin_factory, _pin_factory_name
     with _shared_lock:
         if not _pin_factory_name:
@@ -78,7 +81,7 @@ def get_pin_factory() -> tuple[Any, str]:
                 _pin_factory_name = "pigpio"
             except Exception:
                 _pin_factory = None
-                _pin_factory_name = "PWM por software"
+                _pin_factory_name = "software PWM"
         return _pin_factory, _pin_factory_name
 
 
@@ -90,7 +93,10 @@ class GpioZeroBackend:
         from gpiozero import AngularServo
 
         factory, kind = get_pin_factory()
-        self.name = f"gpiozero GPIO{pan_pin}/GPIO{tilt_pin} ({kind})"
+        # Sin pigpio el pulso lo genera Python y varía con la carga de la CPU.
+        self.software_pwm = kind != "pigpio"
+        kind_text = tr("software PWM") if self.software_pwm else kind
+        self.name = f"gpiozero GPIO{pan_pin}/GPIO{tilt_pin} ({kind_text})"
         options = dict(
             min_angle=0,
             max_angle=180,
@@ -100,10 +106,10 @@ class GpioZeroBackend:
         )
         self.pan = AngularServo(pan_pin, initial_angle=initial[0], **options)
         self.tilt = AngularServo(tilt_pin, initial_angle=initial[1], **options)
-        if kind != "pigpio":
-            log.warning("Los servos usan PWM por software (%s): el pulso varía cuando la CPU está ocupada y los "
-                        "servos tiemblan o se mueven solos. Usa un ESP32 (controlador = esp32), un PCA9685 "
-                        "o pigpio en Raspberry Pi 4.", self.name)
+        if self.software_pwm:
+            log.warning(tr("The servos use software PWM (%s): the pulse varies when the CPU is busy and the "
+                           "servos jitter or move by themselves. Use an ESP32 (driver = esp32), a PCA9685 "
+                           "or pigpio on a Raspberry Pi 4."), self.name)
 
     def write(self, pan: float, tilt: float) -> None:
         self.pan.angle = clamp(pan, 0, 180)
@@ -120,11 +126,12 @@ class GpioZeroBackend:
 
 class PCA9685Backend:
     simulated = False
+    software_pwm = False
 
     def __init__(self, pan_channel: int, tilt_channel: int, min_pulse_us: int, max_pulse_us: int) -> None:
         self.kit = get_servokit()
         self.channels = (pan_channel, tilt_channel)
-        self.name = f"PCA9685 canales {pan_channel}/{tilt_channel}"
+        self.name = tr("PCA9685 channels {pan}/{tilt}", pan=pan_channel, tilt=tilt_channel)
         for channel in self.channels:
             self.kit.servo[channel].set_pulse_width_range(min_pulse_us, max_pulse_us)
             self.kit.servo[channel].actuation_range = 180
@@ -142,9 +149,10 @@ class PCA9685Backend:
 
 
 class Esp32Backend:
-    """Pan y tilt en dos canales del ESP32 (firmware asgard_servos)."""
+    """Pan and tilt on two channels of the ESP32 (asgard_servos firmware)."""
 
     simulated = False
+    software_pwm = False
 
     def __init__(self, port: str, pan_channel: int, tilt_channel: int, min_pulse_us: int, max_pulse_us: int) -> None:
         from .esp32 import acquire_link, release_link
@@ -161,7 +169,7 @@ class Esp32Backend:
 
     @property
     def name(self) -> str:
-        return f"{self.link.name} canales {self.channels[0]}/{self.channels[1]}"
+        return self.link.name + " " + tr("channels {pan}/{tilt}", pan=self.channels[0], tilt=self.channels[1])
 
     def write(self, pan: float, tilt: float) -> None:
         self.link.set_pulses({
@@ -183,7 +191,7 @@ class Esp32Backend:
 
 
 def make_servo_backend(config: Any, simulate: bool = False) -> Any:
-    """Crea el controlador configurado; si falla, usa simulación y lo informa."""
+    """Creates the configured driver; when it fails it falls back to simulation and says so."""
     if simulate or config.driver == "sim":
         return SimBackend()
     try:
@@ -197,12 +205,12 @@ def make_servo_backend(config: Any, simulate: bool = False) -> Any:
             (clamp(config.rest_pan, 0, 180), clamp(config.rest_tilt, 0, 180)),
         )
     except Exception as error:
-        log.error("No se pudieron iniciar los servos (%s): %s. Se continúa en simulación.", config.driver, error)
-        return SimBackend(f"simulación (falló {config.driver}: {error})")
+        log.error(tr("The servos could not be started (%s): %s. Continuing in simulation."), config.driver, error)
+        return SimBackend(tr("simulation ({driver} failed: {error})", driver=config.driver, error=error))
 
 
 class PanTilt:
-    """Mueve los servos hacia el ángulo objetivo con velocidad limitada (°/s)."""
+    """Moves the servos towards the target angle at a limited speed (°/s)."""
 
     def __init__(
         self,
@@ -225,7 +233,7 @@ class PanTilt:
         try:
             self.backend.write(self._pan, self._tilt)
         except Exception as error:
-            log.warning("No se pudo escribir la posición inicial de los servos: %s", error)
+            log.warning(tr("The initial servo position could not be written: %s"), error)
         self._thread = threading.Thread(target=self._loop, name="servos", daemon=True)
         self._thread.start()
 
@@ -255,11 +263,11 @@ class PanTilt:
 
     @property
     def attached(self) -> bool:
-        """Falso cuando los servos están sueltos (sin pulsos) en reposo."""
+        """False when the servos are released (no pulses) while idle."""
         return self._attached
 
     def release_when_still(self) -> None:
-        """Deja de enviar pulsos al llegar al objetivo (evita temblor y consumo)."""
+        """Stops sending pulses once the target is reached (avoids jitter and power draw)."""
         with self._lock:
             self._release_requested = True
 
@@ -285,7 +293,7 @@ class PanTilt:
                     self.backend.write(pan, tilt)
                     self._attached = True
                 except Exception as error:
-                    log.warning("Error al mover los servos: %s", error)
+                    log.warning(tr("Error while moving the servos: %s"), error)
                 written_pan, written_tilt = pan, tilt
             if release and self._attached:
                 try:

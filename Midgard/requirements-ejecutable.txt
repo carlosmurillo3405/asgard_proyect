@@ -1,3 +1,0 @@
-# Solo para construir el ejecutable independiente (construir_ejecutable.py).
--r requirements.txt
-pyinstaller>=6.0

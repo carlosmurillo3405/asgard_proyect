@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Asgard: cliente dedicado del aula (Raspberry Pi).
+"""Asgard: the dedicated classroom client (Raspberry Pi).
 
-Uso normal (lo inicia el servicio o el arranque automático)::
+Normal use (started by the service or by the automatic start)::
 
-    python main.py                      # usa asgard.ini
-    python main.py --simulacion --ventana   # prueba sin hardware
+    python main.py                          # uses asgard.ini
+    python main.py --simulation --windowed  # try it without hardware
 
-Diagnóstico::
+Diagnostics::
 
-    python main.py --listar-audio
-    python main.py --listar-camaras
-    python main.py --probar-servos
-    python main.py --probar-mano
-    python main.py --descargar-modelos full lite
+    python main.py --list-audio
+    python main.py --list-cameras
+    python main.py --test-servos
+    python main.py --test-hand
+    python main.py --download-models full lite
 
-Consulta README.md para la guía completa.
+The language comes from ``[screen] language`` in asgard.ini (the system's by
+default). See README.md for the full guide.
 """
 
 from __future__ import annotations
 
 import argparse
+import configparser
 import logging
 import logging.handlers
 import os
@@ -39,6 +41,7 @@ from asgard.config import (
     missing_credentials,
     set_values,
 )
+from asgard.i18n import set_language, tr
 
 log = logging.getLogger("asgard")
 
@@ -53,37 +56,53 @@ def _utf8_output() -> None:
                 pass
 
 
+def _early_language(argv: list[str]) -> None:
+    """Picks the language from asgard.ini before building the help (the system's when missing)."""
+    path = DEFAULT_CONFIG
+    for index, item in enumerate(argv):
+        if item == "--config" and index + 1 < len(argv):
+            path = Path(argv[index + 1])
+        elif item.startswith("--config="):
+            path = Path(item.split("=", 1)[1])
+    parser = configparser.ConfigParser(inline_comment_prefixes=(";", "#"), interpolation=None)
+    try:
+        parser.read(path, encoding="utf-8")
+        set_language(parser.get("screen", "language", fallback="auto"))
+    except (configparser.Error, OSError, UnicodeDecodeError):
+        set_language("auto")
+
+
 def _raise_interrupt(*_args: object) -> None:
-    """systemd detiene el servicio con SIGTERM: se trata igual que Ctrl+C."""
+    """systemd stops the service with SIGTERM: it is handled like Ctrl+C."""
     raise KeyboardInterrupt
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="Asgard: emite audio y video de máxima calidad, sigue personas con IA y "
-                    "ejecuta las órdenes de Midgard a través de Bifröst.",
+        description=tr("Asgard: sends top-quality audio and video, follows people with AI and "
+                       "carries out Midgard's orders through Bifröst."),
     )
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="archivo de configuración (asgard.ini)")
-    parser.add_argument("--simulacion", action="store_true", help="cámara, IA, servos y mano simulados (sin hardware)")
-    parser.add_argument("--sin-pantalla", action="store_true", help="no abrir la ventana del aula (modo servicio)")
-    parser.add_argument("--ventana", action="store_true", help="ventana normal en lugar de pantalla completa")
-    parser.add_argument("--sin-audio", action="store_true", help="no abrir micrófono ni altavoz")
-    parser.add_argument("--servidor", help="host[:puerto] de Bifröst o 'auto' (reemplaza asgard.ini)")
-    parser.add_argument("--dispositivo", help="identificador del Asgard (reemplaza asgard.ini)")
-    parser.add_argument("--secreto", help="secreto del Asgard (reemplaza asgard.ini)")
-    parser.add_argument("--registro", default="info", choices=("debug", "info", "warning", "error"))
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help=tr("configuration file (asgard.ini)"))
+    parser.add_argument("--simulation", action="store_true", help=tr("simulated camera, AI, servos and hand (no hardware)"))
+    parser.add_argument("--no-screen", action="store_true", help=tr("do not open the classroom window (service mode)"))
+    parser.add_argument("--windowed", action="store_true", help=tr("normal window instead of fullscreen"))
+    parser.add_argument("--no-audio", action="store_true", help=tr("do not open the microphone or speaker"))
+    parser.add_argument("--server", help=tr("Bifröst host[:port] or 'auto' (overrides asgard.ini)"))
+    parser.add_argument("--device", help=tr("Asgard identifier (overrides asgard.ini)"))
+    parser.add_argument("--secret", help=tr("Asgard secret (overrides asgard.ini)"))
+    parser.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
     parser.add_argument("--version", action="version", version=f"Asgard {__version__}")
-    tools = parser.add_argument_group("diagnóstico e instalación")
-    tools.add_argument("--comprobar", action="store_true", help="verifica dependencias, hardware opcional y configuración")
-    tools.add_argument("--listar-audio", action="store_true", help="muestra los dispositivos de audio")
-    tools.add_argument("--listar-camaras", action="store_true", help="busca cámaras USB disponibles")
-    tools.add_argument("--probar-servos", action="store_true", help="recorre los límites de pan y tilt")
-    tools.add_argument("--probar-mano", action="store_true", help="levanta y baja la mano")
-    tools.add_argument("--descargar-modelos", nargs="*", metavar="MODELO",
-                       help="descarga modelos de MediaPipe (lite, full, heavy; por defecto el configurado)")
-    tools.add_argument("--configurar", nargs="+", metavar="SECCION.CLAVE=VALOR",
-                       help="escribe valores en asgard.ini conservando los comentarios")
+    tools = parser.add_argument_group(tr("diagnostics and installation"))
+    tools.add_argument("--check", action="store_true", help=tr("checks dependencies, optional hardware and configuration"))
+    tools.add_argument("--list-audio", action="store_true", help=tr("shows the audio devices"))
+    tools.add_argument("--list-cameras", action="store_true", help=tr("looks for available USB cameras"))
+    tools.add_argument("--test-servos", action="store_true", help=tr("sweeps the pan and tilt limits"))
+    tools.add_argument("--test-hand", action="store_true", help=tr("raises and lowers the hand"))
+    tools.add_argument("--download-models", nargs="*", metavar="MODEL",
+                       help=tr("downloads MediaPipe models (lite, full, heavy; the configured one by default)"))
+    tools.add_argument("--set", nargs="+", metavar="SECTION.KEY=VALUE",
+                       help=tr("writes values into asgard.ini keeping the comments"))
     return parser.parse_args(argv)
 
 
@@ -101,34 +120,34 @@ def setup_logging(level: str, log_file: Path | None) -> None:
             handler.setFormatter(formatter)
             root.addHandler(handler)
         except OSError as error:
-            log.warning("No se pudo abrir el registro %s: %s", log_file, error)
+            log.warning(tr("The log %s could not be opened: %s"), log_file, error)
 
 
 def configure(path: Path, assignments: list[str]) -> int:
     if not path.exists():
         shutil.copyfile(EXAMPLE_CONFIG, path)
-        print(f"Se creó {path} a partir de {EXAMPLE_CONFIG.name}")
+        print(tr("{path} was created from {example}", path=path, example=EXAMPLE_CONFIG.name))
     updates: dict[str, dict[str, str]] = {}
     for item in assignments:
         key, separator, value = item.partition("=")
         section, dot, name = key.partition(".")
         if not separator or not dot or not section or not name:
-            print(f"Formato inválido: {item!r}. Usa seccion.clave=valor (p. ej. bifrost.servidor=192.168.1.20)")
+            print(tr("Invalid format: {item}. Use section.key=value (e.g. bifrost.server=192.168.1.20)", item=repr(item)))
             return 2
         updates.setdefault(section.strip(), {})[name.strip()] = value.strip()
     set_values(path, updates)
     try:
         load_config(path)
     except ConfigError as error:
-        print(f"Aviso: la configuración quedó con un problema: {error}")
+        print(tr("Warning: the configuration was left with a problem: {error}", error=error))
         return 1
-    print(f"Configuración actualizada en {path}")
+    print(tr("Configuration updated in {path}", path=path))
     return 0
 
 
 def download_models(config_path: Path, names: list[str]) -> int:
     from asgard.config import PROGRAM_DIR
-    from asgard.seguimiento import MODEL_FILES, download_model
+    from asgard.tracking import MODEL_FILES, download_model
 
     if not names:
         try:
@@ -139,36 +158,42 @@ def download_models(config_path: Path, names: list[str]) -> int:
     status = 0
     for name in names:
         try:
-            path = download_model(name, PROGRAM_DIR / "modelos")
-            print(f"Modelo {name}: {path}")
+            path = download_model(name, PROGRAM_DIR / "models")
+            print(tr("Model {name}: {path}", name=name, path=path))
         except Exception as error:
-            print(f"No se pudo descargar el modelo {name}: {error}")
+            print(tr("The model {name} could not be downloaded: {error}", name=name, error=error))
             status = 1
     return status
+
+
+def _load_and_apply(config_path: Path):  # noqa: ANN202 - devuelve AsgardConfig
+    config = load_config(config_path)
+    set_language(config.screen.language)
+    return config
 
 
 def test_servos(config_path: Path) -> int:
     from asgard.servos import PanTilt, make_servo_backend
 
-    config = load_config(config_path)
+    config = _load_and_apply(config_path)
     servos = config.servos
     backend = make_servo_backend(servos)
-    print(f"Controlador: {backend.name}")
-    if "PWM por software" in backend.name:
-        print("  Aviso: con PWM por software los servos pueden temblar o moverse solos cuando la CPU está ocupada.")
-        print("  Usa un ESP32 (controlador = esp32), un PCA9685 o pigpio (Raspberry Pi 4).")
+    print(tr("Driver: {name}", name=backend.name))
+    if getattr(backend, "software_pwm", False):
+        print("  " + tr("Warning: with software PWM the servos may jitter or move by themselves when the CPU is busy."))
+        print("  " + tr("Use an ESP32 (driver = esp32), a PCA9685 or pigpio (Raspberry Pi 4)."))
     elif getattr(backend, "simulated", False) and servos.driver != "sim":
-        print("  No se pudo usar el controlador configurado; revisa el mensaje de arriba.")
+        print("  " + tr("The configured driver could not be used; check the message above."))
     pantilt = PanTilt(backend, (servos.pan_min, servos.pan_max), (servos.tilt_min, servos.tilt_max),
                       servos.speed, (servos.rest_pan, servos.rest_tilt))
     path = [
-        ("centro", servos.rest_pan, servos.rest_tilt),
-        ("izquierda (pan mínimo)", servos.pan_min, servos.rest_tilt),
-        ("derecha (pan máximo)", servos.pan_max, servos.rest_tilt),
-        ("centro", servos.rest_pan, servos.rest_tilt),
-        ("abajo (tilt mínimo)", servos.rest_pan, servos.tilt_min),
-        ("arriba (tilt máximo)", servos.rest_pan, servos.tilt_max),
-        ("centro", servos.rest_pan, servos.rest_tilt),
+        (tr("center"), servos.rest_pan, servos.rest_tilt),
+        (tr("left (minimum pan)"), servos.pan_min, servos.rest_tilt),
+        (tr("right (maximum pan)"), servos.pan_max, servos.rest_tilt),
+        (tr("center"), servos.rest_pan, servos.rest_tilt),
+        (tr("down (minimum tilt)"), servos.rest_pan, servos.tilt_min),
+        (tr("up (maximum tilt)"), servos.rest_pan, servos.tilt_max),
+        (tr("center"), servos.rest_pan, servos.rest_tilt),
     ]
     try:
         for label, pan, tilt in path:
@@ -178,30 +203,31 @@ def test_servos(config_path: Path) -> int:
             while pantilt.moving and time.monotonic() < deadline:
                 time.sleep(0.05)
             time.sleep(0.6)
-        print("Si algún eje se movió al revés, cambia invertir_pan/invertir_tilt en asgard.ini.")
+        print(tr("If an axis moved the wrong way, change invert_pan/invert_tilt in asgard.ini."))
         link = getattr(backend, "link", None)
         if link is not None and link.resets:
-            print(f"  Aviso: el ESP32 se reinició {link.resets} vez/veces durante la prueba (último motivo: "
-                  f"{link.last_reset}). Casi siempre es la alimentación: ver «Conexión con ESP32» en el README.")
+            print("  " + tr("Warning: the ESP32 restarted {count} time(s) during the test (last reason: {reason}). "
+                            "It is almost always the power supply: see «ESP32 connection» in the README.",
+                            count=link.resets, reason=link.last_reset))
     finally:
         pantilt.close()
     return 0
 
 
 def test_hand(config_path: Path) -> int:
-    from asgard.actuador import HandActuator, make_hand_backend
+    from asgard.hand import HandActuator, make_hand_backend
 
-    config = load_config(config_path)
-    hand = HandActuator(make_hand_backend(config.actuator, config.servos))
+    config = _load_and_apply(config_path)
+    hand = HandActuator(make_hand_backend(config.hand, config.servos))
     if not hand.available:
-        print("La mano está desactivada ([mano] tipo = ninguno).")
+        print(tr("The hand is turned off ([hand] type = none)."))
         return 1
-    print(f"Actuador: {hand.name}")
+    print(tr("Actuator: {name}", name=hand.name))
     try:
-        print("  -> levantar")
+        print("  -> " + tr("raise"))
         hand.set(True)
         time.sleep(2.0)
-        print("  -> bajar")
+        print("  -> " + tr("lower"))
         hand.set(False)
         time.sleep(1.2)
     finally:
@@ -211,36 +237,34 @@ def test_hand(config_path: Path) -> int:
 
 def run(args: argparse.Namespace) -> int:
     try:
-        config = load_config(args.config)
+        config = _load_and_apply(args.config)
     except ConfigError as error:
-        print(f"Error de configuración: {error}", file=sys.stderr)
+        print(tr("Configuration error: {error}", error=error), file=sys.stderr)
         return 2
-    setup_logging(args.registro, config.log_path)
+    setup_logging(args.log_level, config.log_path)
     for warning in config.warnings:
         log.warning("%s", warning)
-    if args.servidor:
-        config.bifrost.server = args.servidor
-    if args.dispositivo:
-        config.bifrost.device = args.dispositivo
-    if args.secreto:
-        config.bifrost.secret = args.secreto
+    if args.server:
+        config.bifrost.server = args.server
+    if args.device:
+        config.bifrost.device = args.device
+    if args.secret:
+        config.bifrost.secret = args.secret
     if missing_credentials(config):
-        log.error(
-            "Falta el identificador o el secreto del Asgard en %s. Regístralo en Bifröst con "
-            "'python main.py asgard registrar <id>' y configúralo con "
-            "'./instalar.sh --dispositivo <id> --secreto <secreto>'.", config.path,
-        )
+        log.error(tr("The Asgard identifier or secret is missing in %s. Register it in Bifröst with "
+                     "'python main.py asgard register <id>' and configure it with "
+                     "'./install.sh --device <id> --secret <secret>'."), config.path)
         return 2
 
-    from asgard.aplicacion import AsgardApp
+    from asgard.app import AsgardApp
 
-    mode = "ninguna" if args.sin_pantalla else ("ventana" if args.ventana else config.screen.mode)
-    use_audio = not args.sin_audio
-    reason = "" if mode == "ninguna" else _screen_unavailable()
-    if mode == "ninguna" or reason:
+    mode = "none" if args.no_screen else ("window" if args.windowed else config.screen.mode)
+    use_audio = not args.no_audio
+    reason = "" if mode == "none" else _screen_unavailable()
+    if mode == "none" or reason:
         if reason:
-            log.warning("%s Se continúa sin pantalla.", reason)
-        app = AsgardApp(config, simulate=args.simulacion, use_audio_devices=use_audio)
+            log.warning(tr("%s Continuing without a screen."), reason)
+        app = AsgardApp(config, simulate=args.simulation, use_audio_devices=use_audio)
         signal.signal(signal.SIGTERM, _raise_interrupt)
         app.run_forever()
         return 0
@@ -248,28 +272,28 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _screen_unavailable() -> str:
-    """Motivo por el que no se puede abrir la pantalla del aula (vacío si se puede)."""
+    """Why the classroom screen cannot be opened (empty when it can)."""
     if sys.platform.startswith("linux") and not (
         os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or os.environ.get("QT_QPA_PLATFORM")
     ):
-        return "No hay sesión gráfica (DISPLAY/WAYLAND_DISPLAY)."
+        return tr("There is no graphical session (DISPLAY/WAYLAND_DISPLAY).")
     try:
         from asgard import qt  # noqa: F401
     except ImportError as error:
-        return f"No está instalada la biblioteca Qt ({error})."
+        return tr("The Qt library is not installed ({error}).", error=error)
     return ""
 
 
 def run_with_screen(config: object, args: argparse.Namespace, mode: str, use_audio: bool) -> int:
-    from asgard import tema
-    from asgard.aplicacion import AsgardApp
-    from asgard.pantalla_aula import AsgardScreen
+    from asgard import theme
+    from asgard.app import AsgardApp
+    from asgard.classroom_screen import AsgardScreen
     from asgard.qt import QtCore, QtWidgets, exec_, prepare_application
 
     prepare_application()
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     qt_app.setApplicationName("Asgard")
-    tema.aplicar_tema(qt_app)
+    theme.apply_theme(qt_app)
     holder: dict[str, AsgardApp] = {}
 
     def close() -> None:
@@ -278,10 +302,10 @@ def run_with_screen(config: object, args: argparse.Namespace, mode: str, use_aud
             app.stop()
         qt_app.quit()
 
-    screen = AsgardScreen(config.bifrost.device, fullscreen=mode == "completa",  # type: ignore[attr-defined]
+    screen = AsgardScreen(config.bifrost.device, fullscreen=mode == "fullscreen",  # type: ignore[attr-defined]
                           chat_font_size=config.screen.chat_font_size, on_close=close,  # type: ignore[attr-defined]
                           show_status=config.screen.diagnostics)  # type: ignore[attr-defined]
-    app = AsgardApp(config, simulate=args.simulacion, screen=screen, use_audio_devices=use_audio)  # type: ignore[arg-type]
+    app = AsgardApp(config, simulate=args.simulation, screen=screen, use_audio_devices=use_audio)  # type: ignore[arg-type]
     holder["app"] = app
 
     def request_close(*_args: object) -> None:
@@ -293,62 +317,65 @@ def run_with_screen(config: object, args: argparse.Namespace, mode: str, use_aud
     heartbeat = QtCore.QTimer()
     heartbeat.timeout.connect(lambda: None)
     heartbeat.start(400)
-    screen.mostrar()
+    screen.present()
     app.start()
     return exec_(qt_app)
 
 
 def check_installation(config_path: Path) -> int:
-    """Verifica dependencias obligatorias y opcionales, y la configuración."""
+    """Checks the required and optional dependencies and the configuration."""
     required = [
         ("OpenCV", "import cv2"),
         ("NumPy", "import numpy"),
         ("Pillow", "import PIL.Image"),
         ("Audio (sounddevice/PortAudio)", "import sounddevice; sounddevice.query_devices()"),
-        ("Cifrado (cryptography)", "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
-        ("Asgard", "import asgard.aplicacion"),
+        (tr("Encryption (cryptography)"), "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
+        ("Asgard", "import asgard.app"),
     ]
     optional = [
-        ("Pantalla del aula (Qt)", "from asgard import qt; detalle = qt.description()"),
-        ("IA (MediaPipe)", "import mediapipe"),
-        ("Servos por GPIO (gpiozero)", "import gpiozero"),
-        ("Servos por I2C (PCA9685)", "import adafruit_servokit"),
-        ("Servos por ESP32 (pyserial)", "from asgard.esp32 import describe_ports; detalle = describe_ports()"),
-        ("Cámara CSI (picamera2)", "import picamera2"),
+        (tr("Classroom screen (Qt)"), "from asgard import qt; detail = qt.description()"),
+        (tr("AI (MediaPipe)"), "import mediapipe"),
+        (tr("Servos over GPIO (gpiozero)"), "import gpiozero"),
+        (tr("Servos over I2C (PCA9685)"), "import adafruit_servokit"),
+        (tr("Servos over ESP32 (pyserial)"), "from asgard.esp32 import describe_ports; detail = describe_ports()"),
+        (tr("CSI camera (picamera2)"), "import picamera2"),
     ]
     problems = 0
-    for group, items in (("obligatorio", required), ("opcional", optional)):
+    ok, fail, missing = "OK    ", tr("FAIL  "), tr("missing")
+    for required_group, items in ((True, required), (False, optional)):
         for label, statement in items:
             namespace: dict[str, object] = {}
             try:
                 exec(statement, namespace)
-                detail = namespace.get("detalle")
-                print(f"  OK     {label}" + (f": {detail}" if detail else ""))
+                detail = namespace.get("detail")
+                print(f"  {ok} {label}" + (f": {detail}" if detail else ""))
             except Exception as error:  # se informa cualquier fallo de importación
-                print(f"  {'FALLA ' if group == 'obligatorio' else 'falta '} {label}: {error}")
-                problems += group == "obligatorio"
+                print(f"  {fail if required_group else missing:<6} {label}: {error}")
+                problems += required_group
     try:
-        config = load_config(config_path)
-        print(f"  OK     Configuración {config.path}")
+        config = _load_and_apply(config_path)
+        print(f"  {ok} " + tr("Configuration {path}", path=config.path))
         if missing_credentials(config):
-            print("  FALLA  Falta [bifrost] dispositivo o secreto")
+            print(f"  {fail} " + tr("[bifrost] device or secret is missing"))
             problems += 1
-        from asgard.seguimiento import ai_status
+        from asgard.tracking import ai_status
 
         available, reason, _ = ai_status(config.ai, config.models_dir, download=False)
-        print(f"  {'OK    ' if available else 'aviso '} IA: {reason}")
+        print(f"  {ok if available else tr('notice'):<6} " + tr("AI: {reason}", reason=reason))
     except ConfigError as error:
-        print(f"  FALLA  Configuración: {error}")
+        print(f"  {fail} " + tr("Configuration: {error}", error=error))
         problems += 1
     return 1 if problems else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     _utf8_output()
+    argv = sys.argv[1:] if argv is None else argv
+    _early_language(argv)
     args = parse_args(argv)
-    if args.comprobar:
+    if args.check:
         return check_installation(args.config)
-    if args.listar_audio:
+    if args.list_audio:
         from asgard.audio import AudioDeviceError, print_devices
 
         try:
@@ -357,23 +384,23 @@ def main(argv: list[str] | None = None) -> int:
             print(error)
             return 1
         return 0
-    if args.listar_camaras:
-        from asgard.imagen import scan_cameras
+    if args.list_cameras:
+        from asgard.imaging import scan_cameras
 
         cameras = scan_cameras()
-        print("\n".join(f"  {index}: {label}" for index, label in cameras) or "No se encontraron cámaras USB.")
-        print("Para una cámara CSI de Raspberry Pi usa camara = picamera2 en asgard.ini.")
+        print("\n".join(f"  {index}: {label}" for index, label in cameras) or tr("No USB cameras were found."))
+        print(tr("For a Raspberry Pi CSI camera use camera = picamera2 in asgard.ini."))
         return 0
-    if args.configurar:
-        return configure(args.config, args.configurar)
-    if args.descargar_modelos is not None:
-        return download_models(args.config, args.descargar_modelos)
-    if args.probar_servos or args.probar_mano:
+    if args.set:
+        return configure(args.config, args.set)
+    if args.download_models is not None:
+        return download_models(args.config, args.download_models)
+    if args.test_servos or args.test_hand:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
         try:
-            return test_servos(args.config) if args.probar_servos else test_hand(args.config)
+            return test_servos(args.config) if args.test_servos else test_hand(args.config)
         except ConfigError as error:
-            print(f"Error de configuración: {error}", file=sys.stderr)
+            print(tr("Configuration error: {error}", error=error), file=sys.stderr)
             return 2
     return run(args)
 

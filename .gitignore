@@ -10,19 +10,19 @@ __pycache__/
 /.idea/
 
 # Datos y archivos generados por los programas (no se versionan)
-/Bifrost/datos/
+/Bifrost/data/
 /Asgard/Software/asgard.ini
-/Asgard/Software/estado_asgard.json
-/Asgard/Software/estado_asgard.tmp
-/Asgard/Software/modelos/
-/Asgard/Software/registros/
-/Asgard/Software/.restricciones-pip.txt
+/Asgard/Software/asgard_status.json
+/Asgard/Software/asgard_status.tmp
+/Asgard/Software/models/
+/Asgard/Software/logs/
+/Asgard/Software/.pip-constraints.txt
 /Midgard/build/
 /Midgard/dist/
-/Midgard/iniciar_midgard.bat
+/Midgard/start_midgard.bat
 /Midgard/midgard.sh
 /Midgard/Midgard.command
 *.log
 /Midgard/midgard.ico
 /Midgard/midgard.png
-/Demo/datos/
+/Demo/data/

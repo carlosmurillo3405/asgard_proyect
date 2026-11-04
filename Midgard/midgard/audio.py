@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Motor de audio en tiempo real compartido por Asgard y Midgard.
+"""Real-time audio engine shared by Asgard and Midgard.
 
-ARCHIVO COMPARTIDO: la versión original está en ``Comun/audio.py``; se copia
-a cada programa con ``python Comun/sincronizar.py``.
+SHARED FILE: the original lives in ``Common/audio.py``; it is copied to each
+program by ``python Common/sync.py``.
 
-PCM de 16 bits a 48 kHz en bloques de 5 ms, con jitter buffer. Además:
+16-bit PCM at 48 kHz in 5 ms blocks, with a jitter buffer. Also:
 
-* cifrado y autenticación por datagrama (ChaCha20-Poly1305);
-* respaldo automático por TCP cuando la red bloquea UDP;
-* colchón de red adaptable (crece si hay cortes y se reduce si la red mejora);
-* tonos de aviso mezclados en la salida (mano levantada, mensaje nuevo).
+* per-datagram encryption and authentication (ChaCha20-Poly1305);
+* automatic TCP fallback when the network blocks UDP;
+* adaptive network buffer (grows on dropouts, shrinks when the network improves);
+* notification tones mixed into the output (raised hand, new message).
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ from typing import Any
 
 import numpy as np
 
-from .protocolo import (
+from .i18n import tr
+from .protocol import (
     AUDIO_BLOCK_FRAMES,
     AUDIO_RATE,
     DGRAM_AUDIO,
@@ -46,17 +47,18 @@ log = logging.getLogger(__name__)
 
 
 class AudioDeviceError(RuntimeError):
-    """No se pudo usar un dispositivo de audio."""
+    """An audio device could not be used."""
 
 
 def _sounddevice():
     try:
         import sounddevice as sd
     except (ImportError, OSError) as error:
-        raise AudioDeviceError(
-            f"No se pudo cargar sounddevice/PortAudio: {error}. "
-            "En Linux instala libportaudio2 (sudo apt install libportaudio2)."
-        ) from error
+        raise AudioDeviceError(tr(
+            "sounddevice/PortAudio could not be loaded: {error}. "
+            "On Linux install libportaudio2 (sudo apt install libportaudio2).",
+            error=error,
+        )) from error
     return sd
 
 
@@ -77,7 +79,7 @@ class AudioDevice:
 
 
 def list_devices(kind: str | None = None, default_api_only: bool = False) -> list[AudioDevice]:
-    """Lista dispositivos. ``kind`` = 'input' u 'output' filtra por capacidad."""
+    """Lists devices. ``kind`` = 'input' or 'output' filters by capability."""
     sd = _sounddevice()
     hostapis = sd.query_hostapis()
     default_api = None
@@ -106,34 +108,35 @@ def list_devices(kind: str | None = None, default_api_only: bool = False) -> lis
 
 
 def print_devices() -> None:
-    print("\nDispositivos de audio disponibles:\n")
+    print("\n" + tr("Available audio devices:") + "\n")
     for device in list_devices():
         kinds = []
         if device.max_inputs:
-            kinds.append(f"ENTRADA({device.max_inputs})")
+            kinds.append(tr("INPUT({count})", count=device.max_inputs))
         if device.max_outputs:
-            kinds.append(f"SALIDA({device.max_outputs})")
+            kinds.append(tr("OUTPUT({count})", count=device.max_outputs))
         print(f"  [{device.index:2d}] {device.name} - {device.hostapi} {' '.join(kinds)}")
     print()
 
 
 def resolve_device(kind: str, value: Any) -> int | None:
-    """Convierte un índice o (parte de) un nombre en el índice de PortAudio.
+    """Turns an index or (part of) a name into the PortAudio index.
 
-    ``None``, vacío o 'predeterminado' significan el dispositivo del sistema.
+    ``None``, empty, 'default' or 'auto' mean the system device.
     """
     if value is None:
         return None
     text = str(value).strip()
-    if not text or text.lower() in ("predeterminado", "default", "auto"):
+    if not text or text.lower() in ("default", "auto"):
         return None
-    label = "entrada" if kind == "input" else "salida"
     devices = list_devices(kind)
     if text.isdigit():
         index = int(text)
         if any(device.index == index for device in devices):
             return index
-        raise AudioDeviceError(f"El dispositivo {index} no sirve como {label}.")
+        if kind == "input":
+            raise AudioDeviceError(tr("Device {index} cannot be used as an input.", index=index))
+        raise AudioDeviceError(tr("Device {index} cannot be used as an output.", index=index))
     lowered = text.lower()
     for device in devices:
         if device.name.lower() == lowered or device.label.lower() == lowered:
@@ -141,19 +144,21 @@ def resolve_device(kind: str, value: Any) -> int | None:
     for device in devices:
         if lowered in device.name.lower():
             return device.index
-    raise AudioDeviceError(f"No se encontró un dispositivo de {label} que contenga '{text}'.")
+    if kind == "input":
+        raise AudioDeviceError(tr("No input device contains '{text}'.", text=text))
+    raise AudioDeviceError(tr("No output device contains '{text}'.", text=text))
 
 
 # --------------------------------------------------------------------------- #
 # Jitter buffer
 # --------------------------------------------------------------------------- #
 class JitterBuffer:
-    """Absorbe la variación de llegada de los paquetes de audio.
+    """Absorbs the arrival jitter of audio packets.
 
-    Empieza a reproducir cuando acumula ``target`` muestras. Si se vacía, el
-    objetivo crece 10 ms (hasta ``max_target_ms``); tras 15 s sin cortes baja
-    5 ms hacia el valor base. Si el retraso crece demasiado se descarta lo
-    más antiguo para no acumular latencia.
+    Playback starts once ``target`` samples are buffered. When it runs dry the
+    target grows by 10 ms (up to ``max_target_ms``); after 15 s without dropouts
+    it shrinks by 5 ms towards the base value. If the delay grows too much the
+    oldest data is dropped so latency does not pile up.
     """
 
     def __init__(
@@ -236,7 +241,7 @@ class JitterBuffer:
 
 
 def convert_channels(block: np.ndarray, target: int) -> np.ndarray:
-    """Convierte un bloque (n, c) a (n, target) entre mono y estéreo."""
+    """Converts an (n, c) block to (n, target) between mono and stereo."""
     channels = block.shape[1]
     if channels == target:
         return block
@@ -248,9 +253,9 @@ def convert_channels(block: np.ndarray, target: int) -> np.ndarray:
 
 
 def make_tone(kind: str, channels: int = 2, rate: int = AUDIO_RATE) -> np.ndarray:
-    """Genera un aviso corto: 'mano' (dos notas) o 'chat' (destello breve)."""
+    """Generates a short notification: 'hand' (two notes) or 'chat' (a brief chime)."""
     notes = {
-        "mano": ((880.0, 0.16), (1318.5, 0.26)),
+        "hand": ((880.0, 0.16), (1318.5, 0.26)),
         "chat": ((987.8, 0.08), (1318.5, 0.10)),
     }.get(kind, ((660.0, 0.15),))
     pieces = []
@@ -269,12 +274,12 @@ def make_tone(kind: str, channels: int = 2, rate: int = AUDIO_RATE) -> np.ndarra
 # Motor
 # --------------------------------------------------------------------------- #
 class AudioEngine:
-    """Captura, envía, recibe y reproduce audio de una sesión.
+    """Captures, sends, receives and plays a session's audio.
 
-    El micrófono se envía por UDP cifrado mientras el servidor confirme los
-    sondeos; si no hay confirmaciones (UDP bloqueado), por el canal TCP de
-    control (``link.send_audio``). Recibe audio por cualquiera de las dos vías.
-    Con ``use_devices=False`` no abre dispositivos (simulación y equipos sin audio).
+    The microphone goes over encrypted UDP while the server acknowledges the
+    probes; without acknowledgements (UDP blocked) it goes over the TCP control
+    channel (``link.send_audio``). Audio is received on either path.
+    With ``use_devices=False`` no devices are opened (simulation and machines without audio).
     """
 
     def __init__(
@@ -329,7 +334,7 @@ class AudioEngine:
 
     # -- ciclo de vida ------------------------------------------------------ #
     def start(self, server_host: str, udp_port: int, channel_id: int, key: bytes, link: Any) -> None:
-        """Arranca la sesión de audio con las credenciales de la bienvenida."""
+        """Starts the audio session with the welcome's credentials."""
         self.stop()
         self._cipher = AudioCipher(key)
         self._channel_id = int(channel_id)
@@ -352,7 +357,7 @@ class AudioEngine:
         self._running.set()
         self._threads = [
             threading.Thread(target=self._receive_loop, name="audio-rx", daemon=True),
-            threading.Thread(target=self._probe_loop, name="audio-sondeo", daemon=True),
+            threading.Thread(target=self._probe_loop, name="audio-probe", daemon=True),
         ]
         for thread in self._threads:
             thread.start()
@@ -381,7 +386,7 @@ class AudioEngine:
         return self._running.is_set()
 
     def reopen_devices(self, input_device: int | None, output_device: int | None) -> None:
-        """Cambia micrófono y altavoz sin reiniciar la sesión."""
+        """Switches microphone and speaker without restarting the session."""
         self.input_device = input_device
         self.output_device = output_device
         if self._running.is_set() and self.use_devices:
@@ -420,7 +425,7 @@ class AudioEngine:
                 self._in_stream = stream
             except Exception as error:
                 self._in_stream = None
-                self.errors.append(f"Micrófono no disponible: {error}")
+                self.errors.append(tr("Microphone unavailable: {error}", error=error))
             try:
                 info = sd.query_devices(self.output_device, "output")
                 out_channels = max(1, min(self.channels, int(info["max_output_channels"])))
@@ -440,7 +445,7 @@ class AudioEngine:
                 self._out_stream = stream
             except Exception as error:
                 self._out_stream = None
-                self.errors.append(f"Altavoz no disponible: {error}")
+                self.errors.append(tr("Speaker unavailable: {error}", error=error))
             for message in self.errors:
                 log.warning("%s", message)
 
@@ -468,11 +473,11 @@ class AudioEngine:
     @property
     def transport(self) -> str:
         if not self._running.is_set():
-            return "inactivo"
+            return "inactive"
         return "UDP" if self._use_udp() else "TCP"
 
     def send_block(self, pcm: bytes, channels: int) -> None:
-        """Envía un bloque PCM."""
+        """Sends a PCM block."""
         if not self._running.is_set() or self._cipher is None:
             return
         if self._use_udp():
@@ -551,7 +556,7 @@ class AudioEngine:
             self._push(datagram.channels, datagram.payload)
 
     def feed_tcp(self, meta: dict[str, Any], data: bytes) -> None:
-        """Entrega audio recibido por el canal TCP de control."""
+        """Hands over audio received on the TCP control channel."""
         channels = meta.get("ch")
         if self._running.is_set() and valid_pcm(channels, data):
             self.received_tcp += 1
@@ -564,13 +569,13 @@ class AudioEngine:
 
     # -- reproducción ------------------------------------------------------- #
     def play_tone(self, kind: str) -> None:
-        """Reproduce un aviso en la salida local (se mezcla con la voz remota)."""
+        """Plays a notification on the local output (mixed with the remote voice)."""
         with self._tone_lock:
             self._tone = make_tone(kind, self.out_channels)
             self._tone_pos = 0
 
     def render(self, frames: int) -> np.ndarray:
-        """Siguiente bloque de salida: voz remota más avisos (lo usa el callback)."""
+        """Next output block: remote voice plus notifications (used by the callback)."""
         data = self.jitter.pull(frames)
         with self._tone_lock:
             tone = self._tone

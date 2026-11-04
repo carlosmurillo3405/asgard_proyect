@@ -1,96 +1,102 @@
-# Firmware del ESP32 para los servos de Asgard
+# ESP32 firmware for Asgard's servos
 
-`asgard_servos/` es un proyecto de **PlatformIO** que convierte un ESP32 en el controlador de los servos de Asgard (pan, tilt y mano). La Raspberry Pi le envía por USB el ancho de pulso de cada servo y el ESP32 genera la señal con su **PWM por hardware**. Así los pulsos no varían aunque la Raspberry esté al 100 % con la IA y el video, que es lo que hace temblar o «volverse locos» a los servos con el PWM por software de `gpiozero`.
+**English** · [Español](README.es.md)
 
-Además:
+`asgard_servos/` is a **PlatformIO** project that turns an ESP32 into the driver of Asgard's servos (pan, tilt and hand). The Raspberry Pi sends it each servo's pulse width over USB and the ESP32 generates the signal with its **hardware PWM**. That way the pulses do not vary even when the Raspberry Pi is at 100 % with the AI and the video, which is what makes the servos jitter or «go crazy» with `gpiozero`'s software PWM.
 
-- **Arranca sin pulsos.** Los servos no saltan al encender ni al programar el ESP32.
-- **Perro guardián.** Si la Raspberry deja de enviar datos durante 1,5 s (se colgó o se desconectó el cable), suelta los servos.
-- **Avisa los reinicios.** Si se reinicia por una caída de voltaje, lo informa y Asgard lo escribe en su registro y vuelve a enviar las posiciones.
+Also:
 
-## Canales y pines
+- **It starts without pulses.** The servos do not jump when powering on or when flashing the ESP32.
+- **Watchdog.** When the Raspberry Pi stops sending data for 1.5 s (it hung or the cable was unplugged), it releases the servos.
+- **It reports resets.** When it resets because of a voltage drop, it says so and Asgard writes it to its log and sends the positions again.
 
-| Canal | Uso | ESP32 clásico (DevKit, WROOM-32) | ESP32-S3 / C3 / C6 |
+## Channels and pins
+
+| Channel | Use | Classic ESP32 (DevKit, WROOM-32) | ESP32-S3 / C3 / C6 |
 | --- | --- | --- | --- |
 | 0 | Pan (horizontal) | GPIO 25 | GPIO 4 |
 | 1 | Tilt (vertical) | GPIO 26 | GPIO 5 |
-| 2 | Mano | GPIO 27 | GPIO 6 |
+| 2 | Hand | GPIO 27 | GPIO 6 |
 
-Son pines sin función de arranque (*strapping*) y no comparten el puerto serie. Para usar otros, cambia `PINES[]` en `include/configuracion.h`.
+They are pins with no boot (*strapping*) function and they do not share the serial port. To use others, change `PINS[]` in `include/config.h`.
 
-## Estructura
+## Layout
 
 ```
 asgard_servos/
-  platformio.ini            placas (esp32dev, esp32-s3, esp32-c3) y monitor serie
-  include/configuracion.h   pines, versión del firmware y límites de los pulsos
-  include/servos.h          interfaz de la señal PWM
-  include/protocolo.h       interfaz de las órdenes por el puerto serie
-  src/main.cpp              setup() y loop()
-  src/servos.cpp            PWM por hardware (LEDC), núcleo esp32 2.x y 3.x
-  src/protocolo.cpp         órdenes, identificación, perro guardián y motivo de reinicio
+  platformio.ini        boards (esp32dev, esp32-s3, esp32-c3) and serial monitor
+  include/config.h      pins, firmware and protocol versions, pulse limits
+  include/servos.h      PWM signal interface
+  include/protocol.h    serial command interface
+  src/main.cpp          setup() and loop()
+  src/servos.cpp        hardware PWM (LEDC), esp32 core 2.x and 3.x
+  src/protocol.cpp      commands, identification, watchdog and reset reason
 ```
 
-## Cargar el firmware
+Code names and protocol messages are in English; comments are in Spanish.
 
-**VS Code** con la extensión *PlatformIO IDE*:
+## Flashing the firmware
 
-1. *Archivo → Abrir carpeta…* → `Asgard/Firmware/asgard_servos`.
-2. Elige el entorno en la barra inferior (`env:esp32dev` para un ESP32 clásico).
-3. Conecta el ESP32 y pulsa **→ Upload** en la barra inferior.
+**VS Code** with the *PlatformIO IDE* extension:
 
-**Terminal**, desde `asgard_servos/`:
+1. *File → Open Folder…* → `Asgard/Firmware/asgard_servos`.
+2. Pick the environment in the bottom bar (`env:esp32dev` for a classic ESP32).
+3. Connect the ESP32 and press **→ Upload** in the bottom bar.
+
+**Terminal**, from `asgard_servos/`:
 
 ```bash
-pio run -t upload                  # ESP32 clásico (entorno predeterminado: esp32dev)
-pio run -e esp32-s3 -t upload      # o -e esp32-c3
+pio run -t upload                  # classic ESP32 (default environment: esp32dev)
+pio run -e esp32-s3 -t upload      # or -e esp32-c3
 ```
 
-La plataforma está fijada en `espressif32 @ 6.10.0` (núcleo Arduino 2.0.17), para que todos compilen igual. Si conectas un ESP32-S3 o C3 por su USB nativo, y no por el conversor USB-serie, agrega `build_flags = -DARDUINO_USB_CDC_ON_BOOT=1` a su entorno en `platformio.ini`.
+The platform is pinned to `espressif32 @ 6.10.0` (Arduino core 2.0.17), so everybody builds the same. When an ESP32-S3 or C3 is connected through its native USB, not through the USB-serial converter, add `build_flags = -DARDUINO_USB_CDC_ON_BOOT=1` to its environment in `platformio.ini`.
 
-## Probarlo sin la Raspberry
+> Asgard 2 needs firmware 2.0 (protocol 2). When the ESP32 has firmware 1.x, Asgard reports «incompatible firmware»: flash it again.
 
-Abre el monitor serie (**🔌 Serial Monitor** en VS Code, o `pio device monitor`). Ya está configurado a 115200 baudios y envía cada línea al pulsar Enter. Escribe:
+## Trying it without the Raspberry Pi
+
+Open the serial monitor (**🔌 Serial Monitor** in VS Code, or `pio device monitor`). It is already set to 115200 baud and sends each line when Enter is pressed. Type:
 
 ```
-?            → ASGARD-SERVOS proto=1 canales=3 fw=1.0.0 chip=… espera=0
-S 0 1500     → pan al centro (1500 µs)
+?            → ASGARD-SERVOS proto=2 channels=3 fw=2.0.0 chip=… timeout=0
+S 0 1500     → pan to the center (1500 µs)
 S 0 1000 1 2000
-E            → estado espera=0 0=1000 1=2000 2=0
-X            → suelta todos
-H            → ayuda
+E            → state timeout=0 0=1000 1=2000 2=0
+X            → releases everything
+H            → help
 ```
 
-## Usarlo en Asgard
+## Using it with Asgard
 
-1. Conecta el ESP32 a un puerto USB de la Raspberry, con un cable de datos.
-2. En la Raspberry:
+1. Connect the ESP32 to a USB port of the Raspberry Pi, with a data cable.
+2. On the Raspberry Pi:
    ```bash
-   ./instalar.sh --servos esp32      # instala pyserial y agrega tu usuario al grupo dialout
-   sudo reboot                       # solo la primera vez, para aplicar el grupo
-   .venv/bin/python main.py --probar-servos
-   .venv/bin/python main.py --probar-mano
+   ./install.sh --servos esp32       # installs pyserial and adds your user to the dialout group
+   sudo reboot                       # only the first time, to apply the group
+   .venv/bin/python main.py --test-servos
+   .venv/bin/python main.py --test-hand
    ```
-3. `--probar-servos` debe mostrar `Controlador: ESP32 /dev/ttyUSB0 (firmware 1.0.0, PWM por hardware) canales 0/1`.
+3. `--test-servos` must show `Driver: ESP32 /dev/ttyUSB0 (firmware 2.0.0, hardware PWM) channels 0/1`.
 
-El puerto se detecta solo. Si hay varios dispositivos serie, fíjalo en `asgard.ini` con `[servos] puerto_serie = /dev/ttyUSB0` (o `/dev/ttyACM0`). La calibración sigue en `asgard.ini`: `pulso_min_us`, `pulso_max_us`, los límites y la velocidad.
+The port is detected by itself. With several serial devices, set it in `asgard.ini` with `[servos] serial_port = /dev/ttyUSB0` (or `/dev/ttyACM0`). Calibration stays in `asgard.ini`: `min_pulse_us`, `max_pulse_us`, the limits and the speed.
 
-El cableado, la alimentación y la tierra están en la [guía de Asgard](../Software/README.md#conexión-con-esp32-recomendada).
+Wiring, power and ground are in the [Asgard guide](../Software/README.md#esp32-wiring-recommended).
 
-## Protocolo
+## Protocol (version 2)
 
-Texto a 115200 baudios, una orden por línea (`\n`):
+Text at 115200 baud, one command per line (`\n`):
 
-| Orden | Respuesta | Efecto |
+| Command | Answer | Effect |
 | --- | --- | --- |
-| `?` | `ASGARD-SERVOS proto=1 canales=3 fw=… chip=… espera=…` | Identificación |
-| `S canal us [canal us …]` | — (solo `err …` si hay error) | Ancho de pulso en µs (400–2600; `0` = soltar el servo) |
-| `X` | `ok X` | Suelta todos los servos |
-| `T ms` | `ok T ms` | Perro guardián (`0` = apagado, el valor al arrancar). Asgard usa 1500 ms |
-| `K` | — | Mantener vivo |
-| `E` | `estado espera=… 0=… 1=… 2=…` | Pulsos actuales |
-| `H` | líneas `# …` | Ayuda |
+| `?` | `ASGARD-SERVOS proto=2 channels=3 fw=… chip=… timeout=…` | Identification |
+| `S channel us [channel us …]` | — (only `err …` on errors) | Pulse width in µs (400–2600; `0` = release the servo) |
+| `X` | `ok X` | Releases every servo |
+| `T ms` | `ok T ms` | Watchdog (`0` = off, the value at boot; at most 60000). Asgard uses 1500 ms |
+| `K` | — | Keep alive |
+| `E` | `state timeout=… 0=… 1=… 2=…` | Current pulses |
+| `H` | `# …` lines | Help |
 
-Al arrancar escribe `ASGARD-SERVOS lista proto=1 canales=3 fw=… chip=… reinicio=<motivo>`, donde el motivo puede ser `encendido`, `externo`, `software`, `voltaje` (brownout), `fallo` o `vigilante`. Cuando el perro guardián suelta los servos escribe `aviso sin datos de la Raspberry: servos sueltos`.
+At boot it writes `ASGARD-SERVOS ready proto=2 channels=3 fw=… chip=… reset=<reason>`, where the reason can be `poweron`, `external`, `software`, `brownout` (voltage drop), `panic`, `watchdog`, `deepsleep` or `other`. When the watchdog releases the servos it writes `warn no data from the Raspberry Pi: servos released`. Errors start with `err` and confirmations with `ok`.
 
-La señal es de 50 Hz con 14 bits de resolución (1,22 µs por paso, unas 0,12° con la calibración predeterminada).
+The signal is 50 Hz with 14-bit resolution (1.22 µs per step, about 0.12° with the default calibration).

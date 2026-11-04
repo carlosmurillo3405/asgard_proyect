@@ -6,14 +6,14 @@
 namespace servos {
 
 // Prepara todos los canales sin pulsos (servos sueltos).
-void iniciar();
+void begin();
 
 // Ancho de pulso en µs. 0 suelta el servo; otro valor se limita a
-// PULSO_MIN_US..PULSO_MAX_US.
-void aplicar(uint8_t canal, uint16_t us);
+// MIN_PULSE_US..MAX_PULSE_US.
+void apply(uint8_t channel, uint16_t us);
 
-void soltar_todo();
+void release_all();
 
-uint16_t pulso(uint8_t canal);
+uint16_t pulse(uint8_t channel);
 
 }  // namespace servos

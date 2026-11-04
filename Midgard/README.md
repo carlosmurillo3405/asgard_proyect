@@ -1,167 +1,186 @@
-# Midgard — cliente de usuario (Windows, Linux y macOS)
+# Midgard — user client (Windows, Linux and macOS)
 
-Midgard es la aplicación del usuario remoto. Con ella:
+**English** · [Español](README.es.md)
 
-- **Inicias sesión** con tu usuario y contraseña; Bifröst los verifica en su base de datos.
-- Ves **tus Asgard** (solo aquellos a los que tienes permiso) con su estado: disponible, en sesión o desconectado.
-- **Ves y escuchas** lo que capta el Asgard, que siempre emite en su máxima calidad. Puedes pausar «Ver» o «Escuchar».
-- **Mueves la cámara** del aula a voluntad, la **fijas en un punto**, guardas posiciones o eliges **a qué persona seguir**.
-- **Compartes tu pantalla** y **tu cámara**, **hablas** por tu micrófono y **escribes mensajes** que aparecen en la pantalla del aula.
-- **Levantas la mano** del Asgard a distancia (acciona su actuador).
-- Eliges **micrófono, altavoz, cámara, pantalla** y la **calidad de envío** de tu video. El audio siempre va en máxima calidad.
+Midgard is the remote user's application. With it you:
 
-La interfaz sigue la plantilla de diseño «UI-Asgard» (tema oscuro, tipografía Inter, logotipo y runas), se adapta a cualquier tamaño de ventana y anima sus transiciones. Está hecha con Qt (PySide6).
+- **Sign in** with your username and password; Bifröst checks them against its database.
+- See **your Asgards** (only those you have permission for) with their status: available, in a session or offline.
+- **See and hear** what the Asgard captures; it always streams in top quality. You can pause «Watch» or «Listen».
+- **Move the classroom camera** at will, **aim it at a point**, save positions or choose **which person to follow**.
+- **Share your screen** and **your camera**, **talk** through your microphone and **write messages** that appear on the classroom screen.
+- **Raise the Asgard's hand** remotely (it drives its actuator).
+- Choose **microphone, speaker, camera, screen** and the **sending quality** of your video. Audio always goes in top quality.
 
-## Pantallas
+The interface follows the «UI-Asgard» design template (dark theme, Inter typeface, logo and runes), adapts to any window size and animates its transitions. It is built with Qt (PySide6) and it is in **English and Spanish**.
 
-### 1. Inicio de sesión
+## Language
 
-Escribe **usuario** y **contraseña** y pulsa **Entrar al Asgard** (o Intro). Midgard se conecta solo al servidor predeterminado (ver más abajo); debajo de la tarjeta se ve el estado del servidor. Si las credenciales no son válidas la tarjeta se sacude y el mensaje explica el motivo (contraseña incorrecta, demasiados intentos, servidor sin conexión…).
+By default Midgard uses the system language. To change it:
 
-Al aceptarse las credenciales, el logotipo del panel izquierdo viaja al centro con un fundido, aparece «Credenciales aceptadas · Preparando el acceso a Asgard…» mientras se carga el listado, y la marca termina acomodándose en la cabecera de la siguiente pantalla.
+- On the **sign-in screen**, the selector in the footer («System language», English, Español).
+- In **View profile → Language**, once signed in.
 
-### 2. Asgard (espera de asignación)
+The choice is saved in the settings and Midgard offers to **restart** to apply it. `python main.py --language es` (or `en`, `auto`) changes the language for that run only. Messages from the server and from the Asgard are also shown in your language, whatever language they run in.
 
-La cabecera muestra la marca, el **selector de vista** y tu **perfil** («Ver perfil»).
+## Screens
 
-- **Vista predeterminada** (para el día a día): la lista de tus Asgard con su estado, y los botones **Actualizar** y **Entrar al Asgard**. Doble clic o Intro sobre un Asgard también entra. La lista se actualiza sola cuando un Asgard se conecta, se desconecta o entra en sesión.
-- **Vista avanzada (desarrollador)**: agrega la sección **Servidor Bifröst** de la plantilla para escribir a mano la dirección, el puerto, usar TLS y fijar la huella del certificado, o **Buscar en la red local**. Muestra además las columnas *Funciones* e *Identificador*. «Usar el servidor automático» vuelve al servidor predeterminado.
+### 1. Sign in
 
-Al entrar, Midgard comprueba con Bifröst el Asgard elegido («Conectando con «Aula 1»…») y abre la llamada.
+Type your **username** and **password** and press **Enter Asgard** (or Enter). Midgard connects by itself to the default server (see below); the server status shows under the card. When the credentials are not valid the card shakes and the message explains why (wrong password, too many attempts, server without connection…).
 
-### 3. Llamada
+Once the credentials are accepted, the logo of the left panel travels to the center with a fade, «Credentials accepted · Preparing access to Asgard…» appears while the list loads, and the brand finally settles in the header of the next screen.
 
-- **Video del Asgard** con la indicación del modo de cámara arriba a la izquierda.
-  - **Clic sobre una persona**: el Asgard la sigue con la cámara (se marca «Siguiendo»). Al pasar el ratón sobre alguien se resalta con «Clic para seguir».
-  - **Clic en cualquier otro punto** (o clic derecho): la cámara centra ese punto y se queda fija.
-  - **Cruceta** (abajo a la izquierda, aparece al pasar el ratón): mueve la cámara; mantenla pulsada para moverla sin parar; con Mayús va más rápido. El botón central la recentra.
-  - **Flechas del teclado**: mueven la cámara (Mayús = pasos grandes).
-  - Abajo a la derecha, la **vista previa** de lo que envías (tu cámara o tu pantalla).
-- **Barra de controles**: Micrófono · Mi cámara · Pantalla · **Mano** · Ver · Escuchar · Chat · Cámara del aula · Ajustes · (Desarrollo) · **Salir**. Los botones cambian de color según el estado: blanco = activo/abierto, rojo = silenciado o apagado.
-- **Panel lateral** (se abre y cierra con animación; en ventanas angostas flota sobre el video):
-  - **Chat**: tus mensajes aparecen en la pantalla del aula; cada uno muestra «✓ Entregado» cuando el Asgard lo recibe.
-  - **Cámara**: modo *Manual*, *Seguir persona* o *Automático* (la persona más cercana), «Dejar de seguir», cruceta, deslizadores de pan y tilt y **posiciones guardadas** (Ir, Guardar…, Borrar).
-  - **Ajustes**: micrófono (con medidor de nivel), altavoz o audífonos (con «Probar»), enviar micrófono, escuchar y ver al Asgard, tu cámara y su calidad (Baja 360p, Media 720p, Alta 1080p), la pantalla a compartir y su calidad (hasta Máxima 1440p).
-  - **Desarrollo** (solo en la vista avanzada): estado de los **servomotores** (posición actual y objetivo entre sus límites, en movimiento, con pulsos o sueltos, velocidad), **seguimiento con IA** (detección activa, frecuencia, modo, objetivo, sensibilidad, velocidad, zona muerta, punto de mira e inversión de ejes), **personas detectadas** con botón «Seguir», **capas sobre el video** (cajas e identificadores, **trayectorias**, **esqueleto**, datos en pantalla, cuadrícula), estadísticas de **red y medios**, datos del **Asgard** y un **registro** que se puede copiar.
-- **Salir** pide confirmación y devuelve el Asgard a reposo; tú vuelves al listado con la sesión iniciada.
+### 2. Asgard (waiting for assignment)
 
-### 4. Perfil («Ver perfil»)
+The header shows the brand, the **view selector** and your **profile** («View profile»).
 
-Foto de perfil (se guarda en tu equipo y se muestra en la pantalla del aula durante tus llamadas), datos de la cuenta y del servidor, **llamadas recientes**, **cambiar contraseña** y **cerrar sesión**.
+- **Default view** (for everyday use): the list of your Asgards with their status, and the **Refresh** and **Enter Asgard** buttons. Double-click or Enter on an Asgard also enters. The list updates by itself when an Asgard connects, disconnects or enters a session.
+- **Advanced view (developer)**: adds the template's **Bifröst server** section to type the address and port by hand, use TLS and pin the certificate fingerprint, or **Search the local network**. It also shows the *Features* and *Identifier* columns. «Use the automatic server» goes back to the default server.
 
-## Servidor predeterminado: el usuario no escribe direcciones
+When entering, Midgard checks the chosen Asgard with Bifröst («Connecting to «Room 1»…») and opens the call.
 
-Midgard elige el servidor así, en este orden:
+### 3. Call
 
-1. **Manual**: lo que un desarrollador fijó en la vista avanzada, en «Configurar conexión» (enlace que aparece en la pantalla de acceso si no se encuentra el servidor, o con **Ctrl+Mayús+D**) o con `--servidor`.
-2. **`servidor.json`**: el archivo de conexión que crea el administrador en Bifröst:
+- **Asgard's video** with the camera mode shown at the top left.
+  - **Click a person**: the Asgard follows them with the camera (marked «Following»). Hovering over someone highlights them with «Click to follow».
+  - **Click any other point** (or right-click): the camera centers that point and stays fixed.
+  - **Pad** (bottom left, appears on hover): moves the camera; hold it down to keep moving; with Shift it goes faster. The center button re-centers it.
+  - **Keyboard arrows**: move the camera (Shift = big steps).
+  - At the bottom right, the **preview** of what you are sending (your camera or your screen).
+- **Control bar**: Microphone · My camera · Screen · **Hand** · Watch · Listen · Chat · Room camera · Settings · (Development) · **Leave**. The buttons change color with their state: white = on/open, red = muted or off.
+- **Side panel** (opens and closes with an animation; in narrow windows it floats over the video):
+  - **Chat**: your messages appear on the classroom screen; each one shows «✓ Delivered» when the Asgard receives it.
+  - **Camera**: *Manual*, *Follow person* or *Automatic* mode (the closest person), «Stop following», pad, pan and tilt sliders and **saved positions** (Go, Save…, Delete).
+  - **Settings**: microphone (with a level meter), speaker or headphones (with «Test»), send microphone, listen to and watch the Asgard, your camera and its quality (Low 360p, Medium 720p, High 1080p), the screen to share and its quality (up to Maximum 1440p).
+  - **Development** (advanced view only): status of the **servomotors** (current and target position between their limits, moving, holding or released, speed), **AI tracking** (detection on, rate, mode, target, sensitivity, speed, dead zone, aim point and axis inversion), **detected people** with a «Follow» button, **layers over the video** (boxes and identifiers, **trails**, **skeleton**, on-screen data, grid), **network and media** statistics, **Asgard** data and a **log** that can be copied.
+- **Leave** asks for confirmation and sends the Asgard back to idle; you go back to the list, still signed in.
+
+### 4. Profile («View profile»)
+
+Profile photo (kept on your computer and shown on the classroom screen during your calls), account and server data, **language**, **recent calls**, **change password** and **sign out**.
+
+## Default server: the user types no addresses
+
+Midgard picks the server like this, in this order:
+
+1. **Manual**: what a developer set in the advanced view, in «Connection settings» (a link that appears on the sign-in screen when the server is not found, or with **Ctrl+Shift+D**) or with `--server`.
+2. **`server.json`**: the connection file the administrator creates on Bifröst:
 
    ```bash
-   bifrost cliente --servidor bifrost.midominio.com --tls --salida servidor.json   # (o python main.py cliente ...)
+   bifrost client --server bifrost.mydomain.com --tls --output server.json   # (or python main.py client ...)
    ```
 
-   Cópialo en esta carpeta (`Midgard/`) antes de instalar o de construir el ejecutable. Midgard lo busca junto al programa (o junto a `Midgard.exe`) y en la carpeta de ajustes del usuario. También lo crean los instaladores con `-Servidor`/`--servidor`.
-3. **Red local**: si Bifröst está en modo local en la misma red, se encuentra solo.
-4. **El último servidor que funcionó.**
+   Copy it into this folder (`Midgard/`) before installing or building the executable. Midgard looks for it next to the program (or next to `Midgard.exe`) and in the user's settings folder. The installers also create it with `-Server`/`--server`. Its contents are `{"server", "port", "tls", "fingerprint", "name"}`.
+3. **Local network**: when Bifröst is in local mode on the same network, it is found by itself.
+4. **The last server that worked.**
 
-Con el servidor en Internet con certificado de Let's Encrypt no hace falta huella. Con certificado autofirmado, `servidor.json` incluye la huella; si no, la primera conexión muestra la **huella SHA-256** para compararla con la que da `bifrost huella` y aceptarla. Midgard la recuerda y avisa si un día no coincide (posible suplantación).
+With the server on the Internet and a Let's Encrypt certificate no fingerprint is needed. With a self-signed certificate, `server.json` includes the fingerprint; otherwise the first connection shows the **SHA-256 fingerprint** to compare it with the one `bifrost fingerprint` gives and accept it. Midgard remembers it and warns if one day it does not match (possible impersonation).
 
-## Instalación
+## Installation
+
+The installers show their messages in Spanish when the system is in Spanish (or with `-Language es` / `--language es`).
 
 ### Windows 10/11
 
-1. Haz doble clic en **`instalar_windows.bat`** (o, desde PowerShell, `instalar_windows.ps1`).
-2. Si no tienes Python 3.10+ de 64 bits, el instalador ofrece instalar Python 3.12 con `winget`. También puedes instalarlo desde [python.org](https://www.python.org/downloads/) marcando *Add python.exe to PATH*.
-3. Al terminar aparecen los accesos directos **Midgard** (con su icono) en el Escritorio y en el menú Inicio, y el lanzador `iniciar_midgard.bat`.
+1. Double-click **`install_windows.bat`** (or, from PowerShell, `install_windows.ps1`).
+2. When you have no 64-bit Python 3.10+, the installer offers to install Python 3.12 with `winget`. You can also install it from [python.org](https://www.python.org/downloads/) ticking *Add python.exe to PATH*.
+3. At the end the **Midgard** shortcuts (with their icon) appear on the Desktop and in the Start menu, plus the `start_midgard.bat` launcher.
 
-Opciones: `-Servidor host[:puerto]`, `-Tls`, `-Huella AB:CD:…` (crean `servidor.json`), `-SinAccesoDirecto` y `-Ejecutable` (genera `dist\Midgard\Midgard.exe`).
+Options: `-Server host[:port]`, `-Tls`, `-Fingerprint AB:CD:…` (they create `server.json`), `-NoShortcut`, `-Executable` (builds `dist\Midgard\Midgard.exe`) and `-Language auto|en|es`.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File instalar_windows.ps1 -Servidor bifrost.midominio.com -Tls
+powershell -ExecutionPolicy Bypass -File install_windows.ps1 -Server bifrost.mydomain.com -Tls
 ```
 
-> Windows limita las rutas a 260 caracteres. Si la carpeta está muy anidada y el instalador falla con el error `0xce`, muévela a una ruta corta, por ejemplo `C:\Midgard`.
+> Windows limits paths to 260 characters. When the folder is deeply nested and the installer fails with error `0xce`, move it to a short path, for example `C:\Midgard`.
 
 ### Linux
 
 ```bash
 cd asgard_proyect/Midgard
-chmod +x instalar_linux_mac.sh
-./instalar_linux_mac.sh                      # o con --servidor bifrost.midominio.com --tls
+chmod +x install_linux_mac.sh
+./install_linux_mac.sh                      # or with --server bifrost.mydomain.com --tls
 ```
 
-Instala con apt, dnf o pacman Python, PortAudio y las bibliotecas que Qt necesita en X11 (`libxcb-cursor0`, `libxkbcommon-x11-0`…), crea `.venv` y agrega **Midgard** al menú de aplicaciones. El lanzador es `./midgard.sh`.
+It installs with apt, dnf or pacman Python, PortAudio and the libraries Qt needs on X11 (`libxcb-cursor0`, `libxkbcommon-x11-0`…), creates `.venv` and adds **Midgard** to the applications menu. The launcher is `./midgard.sh`. Other options: `--fingerprint`, `--executable`, `--no-apt` and `--language`.
 
 ### macOS
 
-Instala Python 3.12 de [python.org](https://www.python.org/downloads/) y ejecuta `./instalar_linux_mac.sh`. Se crea **`Midgard.command`** para abrirlo con doble clic. La primera vez, macOS pedirá permiso de **cámara, micrófono y grabación de pantalla**.
+Install Python 3.12 from [python.org](https://www.python.org/downloads/) and run `./install_linux_mac.sh`. A **`Midgard.command`** is created to open it with a double-click. The first time, macOS asks for **camera, microphone and screen recording** permission.
 
-### Ejecutable independiente (sin instalar Python)
-
-```bash
-.venv/bin/python construir_ejecutable.py                                   # Linux / macOS
-.venv\Scripts\python construir_ejecutable.py                               # Windows
-.venv\Scripts\python construir_ejecutable.py --servidor bifrost.midominio.com --tls   # con servidor incluido
-```
-
-Genera `dist/Midgard/` (Windows: `Midgard.exe` con el icono del sistema; macOS: `Midgard.app`), con las tipografías incluidas y, si existe, `servidor.json` dentro y junto al ejecutable. Copia la carpeta completa a otros equipos con el mismo sistema operativo: el ejecutable se construye en el sistema donde se usará. Para verificarlo sin abrir la ventana: `Midgard.exe --comprobar` (el resultado queda en `midgard.log`).
-
-## Opciones de terminal
+### Standalone executable (no Python installation)
 
 ```bash
-python main.py                                   # servidor automático
-python main.py --usuario ana                     # rellena el usuario
-python main.py --servidor 192.168.1.20           # fija el servidor a mano (queda en modo manual)
-python main.py --servidor bifrost.midominio.com --tls --huella AB:CD:...
-python main.py --automatico                      # vuelve al servidor automático
-python main.py --listar-audio | --comprobar | --sin-audio
+.venv/bin/python build_executable.py                                   # Linux / macOS
+.venv\Scripts\python build_executable.py                               # Windows
+.venv\Scripts\python build_executable.py --server bifrost.mydomain.com --tls   # with the server included
 ```
 
-Atajos: **F11** pantalla completa · **Ctrl+Mayús+D** configurar la conexión · **flechas** mover la cámara durante la llamada.
+It builds `dist/Midgard/` (Windows: `Midgard.exe` with the system icon; macOS: `Midgard.app`), with the typefaces and the language catalogs included and, when it exists, `server.json` inside and next to the executable. Copy the whole folder to other computers with the same operating system: the executable is built on the system where it will be used. To check it without opening the window: `Midgard.exe --check` (the result goes to `midgard.log`).
 
-## Ajustes
+## Command-line options
 
-Se recuerdan entre usos: servidor, usuario, vista, dispositivos, calidades, panel abierto, capas de desarrollo, huellas de confianza, foto de perfil y tamaño de ventana. La contraseña **nunca** se guarda (tras un corte de red, Midgard recupera la sesión con un token temporal del servidor). Están en:
+```bash
+python main.py                                   # automatic server
+python main.py --user ana                        # fills in the username
+python main.py --server 192.168.1.20             # sets the server by hand (stays in manual mode)
+python main.py --server bifrost.mydomain.com --tls --fingerprint AB:CD:...
+python main.py --automatic                       # goes back to the automatic server
+python main.py --language es                     # language for this run
+python main.py --list-audio | --check | --no-audio
+```
 
-| Sistema | Carpeta |
+Shortcuts: **F11** full screen · **Ctrl+Shift+D** connection settings · **arrows** move the camera during the call.
+
+## Settings
+
+They are remembered between uses: server, user, language, view, devices, qualities, open panel, development layers, trusted fingerprints, profile photo and window size. The password is **never** saved (after a network drop, Midgard recovers the session with a temporary token from the server). They are in `settings.json`, inside:
+
+| System | Folder |
 | --- | --- |
 | Windows | `%APPDATA%\Midgard` |
 | macOS | `~/Library/Application Support/Midgard` |
 | Linux | `~/.config/midgard` |
 
-En la misma carpeta están el registro `midgard.log` y la carpeta `fotos`. Para usar otra carpeta (pruebas o una copia portátil), define la variable de entorno `MIDGARD_AJUSTES` con su ruta; así lo hace la demostración.
+The same folder holds the `midgard.log` log and the `photos` folder. To use another folder (testing or a portable copy), set the `MIDGARD_CONFIG_DIR` environment variable to its path; the demo does exactly that.
 
-## Reconexión
+> Midgard 2 uses `settings.json`; Midgard 1.x settings (`ajustes.json`) are not read, so the first time choose your devices and your photo again.
 
-Si se corta la red, Midgard reconecta, recupera tu sesión de usuario sin pedir la contraseña y **reanuda la llamada** si vuelve dentro del periodo de gracia del servidor (30 s por defecto). Si el Asgard se desconecta, se avisa y la llamada continúa cuando vuelve. Si el servidor se reinicia, Midgard vuelve a la pantalla de acceso.
+## Reconnection
 
-> Usa **audífonos**: así el micrófono no capta el audio del aula y nadie escucha su propio eco.
+When the network drops, Midgard reconnects, recovers your user session without asking for the password and **resumes the call** when it comes back within the server's grace period (30 s by default). When the Asgard disconnects, you are told and the call goes on when it returns. When the server restarts, Midgard goes back to the sign-in screen.
 
-## Problemas comunes
+> Use **headphones**: that way the microphone does not pick up the classroom audio and nobody hears their own echo.
 
-| Síntoma | Solución |
+## Common problems
+
+| Symptom | Solution |
 | --- | --- |
-| «No se encontró el servidor Bifröst» | Pide `servidor.json` al administrador o usa «Configurar conexión» (Ctrl+Mayús+D). |
-| «Usuario o contraseña incorrectos» / «Demasiados intentos» | Revisa los datos; tras varios fallos el servidor bloquea unos minutos. |
-| «Tu usuario aún no tiene Asgard asignados» | El administrador debe darte permiso: `bifrost permiso otorgar <usuario> <asgard>`. |
-| «El servidor no respondió con TLS» / «…activa TLS» | El modo del servidor y el de Midgard no coinciden: ajusta TLS en la vista avanzada o en `servidor.json`. |
-| «La huella TLS no coincide» | El servidor cambió de certificado o alguien lo suplanta: verifica con el administrador. |
-| «Versión de protocolo incompatible» | Actualiza Midgard, Asgard y Bifröst a la misma versión. |
-| Linux: «Could not load the Qt platform plugin "xcb"» | Instala `libxcb-cursor0` (Debian/Ubuntu) o `xcb-util-cursor` (Fedora, Arch). |
-| No se escucha o no se envía audio | Revisa Ajustes (medidor de nivel y «Probar») o ejecuta `--listar-audio`. En macOS concede el permiso de micrófono. |
-| Compartir pantalla da imagen negra en Linux | Wayland: instala `grim` (wlroots) o inicia sesión en X11. |
+| «The Bifröst server was not found» | Ask the administrator for `server.json` or use «Connection settings» (Ctrl+Shift+D). |
+| «Wrong username or password» / «Too many attempts» | Check the data; after several failures the server blocks for a few minutes. |
+| «Your user has no Asgards assigned yet» | The administrator must give you permission: `bifrost permission grant <user> <asgard>`. |
+| «The server did not answer with TLS» / «…turn TLS on» | The server's mode and Midgard's do not match: adjust TLS in the advanced view or in `server.json`. |
+| «The TLS fingerprint does not match» | The server changed its certificate or someone is impersonating it: check with the administrator. |
+| «Incompatible protocol version» | Update Midgard, Asgard and Bifröst to the same version (2.0 uses protocol 3). |
+| Linux: «Could not load the Qt platform plugin "xcb"» | Install `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Fedora, Arch). |
+| Audio is not heard or not sent | Check Settings (level meter and «Test») or run `--list-audio`. On macOS grant the microphone permission. |
+| Screen sharing gives a black image on Linux | Wayland: install `grim` (wlroots) or sign in to an X11 session. |
 
-## Estructura (desarrollo)
+## Layout (development)
 
-| Archivo | Contenido |
+| File | Contents |
 | --- | --- |
-| `main.py` | Arranque, opciones de terminal y comprobación de la instalación. |
-| `midgard/sesion.py` | Controlador sin interfaz: conexión, inicio de sesión, listado, llamada, audio, envíos de cámara y pantalla. |
-| `midgard/conexion.py` | Servidor predeterminado (manual, `servidor.json`, red local, último). |
-| `midgard/interfaz/` | Interfaz Qt: `acceso.py`, `transicion.py`, `lobby.py`, `llamada.py`, `perfil.py`, `cabecera.py` y `ventana.py`. |
-| `midgard/recursos.py` | Icono de la aplicación y `servidor.json` para los instaladores. |
-| `midgard/qt.py`, `tema.py`, `iconos.py`, `componentes.py`, `fuentes/` | Kit visual compartido con Asgard (copias de `Comun/`). |
+| `main.py` | Start-up, command-line options, language and installation check. |
+| `midgard/session.py` | Controller without interface: connection, sign-in, list, call, audio, camera and screen senders. |
+| `midgard/connection.py` | Default server (manual, `server.json`, local network, last one). |
+| `midgard/settings.py` | Remembered settings (`settings.json`). |
+| `midgard/capture.py` | Camera and screen capture (MSS or `grim`). |
+| `midgard/ui/` | Qt interface: `login.py`, `transition.py`, `lobby.py`, `call.py`, `profile.py`, `header.py` and `window.py`. |
+| `midgard/resources.py` | Application icon and `server.json` for the installers. |
+| `midgard/locale/` | Spanish translations (`midgard.es.json` and `common.es.json`). |
+| `midgard/qt.py`, `theme.py`, `icons.py`, `widgets.py`, `fonts/` | Visual kit shared with Asgard (copies from `Common/`). |
 
-Los módulos compartidos (`protocolo.py`, `red_cliente.py`, `audio.py`, `imagen.py`, `qt.py`, `tema.py`, `iconos.py`, `componentes.py` y la carpeta `fuentes/`) son copias de `Comun/`: edítalos allí y ejecuta `python Comun/sincronizar.py`.
+The shared modules (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, the `fonts/` folder and `locale/common.es.json`) are copies from `Common/`: edit them there and run `python Common/sync.py`.
 
-Tipografías Inter y JetBrains Mono (SIL OFL 1.1) e iconos Lucide (ISC): licencias en `midgard/fuentes/LICENCIAS.txt`.
+Inter and JetBrains Mono typefaces (SIL OFL 1.1) and Lucide icons (ISC): licenses in `midgard/fonts/LICENSES.txt`.

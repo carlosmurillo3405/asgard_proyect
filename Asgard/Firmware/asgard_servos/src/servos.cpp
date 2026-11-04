@@ -1,56 +1,56 @@
 #include "servos.h"
 
-#include "configuracion.h"
+#include "config.h"
 
 namespace servos {
 
-static uint16_t pulso_us[CANALES];   // 0 = suelto
+static uint16_t pulse_us[CHANNELS];   // 0 = suelto
 
 // Núcleo 3.x: ledcAttach/ledcWrite por pin. Núcleo 2.x: ledcSetup/ledcAttachPin por canal.
-static void preparar(uint8_t canal) {
+static void prepare(uint8_t channel) {
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcAttach(PINES[canal], FRECUENCIA_HZ, BITS);
+  ledcAttach(PINS[channel], FREQUENCY_HZ, RESOLUTION_BITS);
 #else
-  ledcSetup(canal, FRECUENCIA_HZ, BITS);
-  ledcAttachPin(PINES[canal], canal);
+  ledcSetup(channel, FREQUENCY_HZ, RESOLUTION_BITS);
+  ledcAttachPin(PINS[channel], channel);
 #endif
 }
 
-static void escribir_ciclo(uint8_t canal, uint32_t ciclo) {
+static void write_duty(uint8_t channel, uint32_t duty) {
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcWrite(PINES[canal], ciclo);
+  ledcWrite(PINS[channel], duty);
 #else
-  ledcWrite(canal, ciclo);
+  ledcWrite(channel, duty);
 #endif
 }
 
-void iniciar() {
-  for (uint8_t canal = 0; canal < CANALES; canal++) {
-    preparar(canal);
-    aplicar(canal, 0);
+void begin() {
+  for (uint8_t channel = 0; channel < CHANNELS; channel++) {
+    prepare(channel);
+    apply(channel, 0);
   }
 }
 
-void aplicar(uint8_t canal, uint16_t us) {
-  if (canal >= CANALES) {
+void apply(uint8_t channel, uint16_t us) {
+  if (channel >= CHANNELS) {
     return;
   }
   if (us != 0) {
-    us = constrain(us, PULSO_MIN_US, PULSO_MAX_US);
+    us = constrain(us, MIN_PULSE_US, MAX_PULSE_US);
   }
-  pulso_us[canal] = us;
+  pulse_us[channel] = us;
   // Ciclo 0 = salida en bajo todo el periodo: sin pulsos, el servo queda suelto.
-  escribir_ciclo(canal, ((uint32_t)us << BITS) / PERIODO_US);
+  write_duty(channel, ((uint32_t)us << RESOLUTION_BITS) / PERIOD_US);
 }
 
-void soltar_todo() {
-  for (uint8_t canal = 0; canal < CANALES; canal++) {
-    aplicar(canal, 0);
+void release_all() {
+  for (uint8_t channel = 0; channel < CHANNELS; channel++) {
+    apply(channel, 0);
   }
 }
 
-uint16_t pulso(uint8_t canal) {
-  return canal < CANALES ? pulso_us[canal] : 0;
+uint16_t pulse(uint8_t channel) {
+  return channel < CHANNELS ? pulse_us[channel] : 0;
 }
 
 }  // namespace servos

@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Comandos de administración de Bifröst (usuarios, Asgard, permisos, sesiones, TLS).
+"""Bifröst administration commands (users, Asgard devices, permissions, sessions, TLS).
 
-Ejemplos::
+Examples::
 
-    python main.py usuario agregar ana --nombre "Ana López"
-    python main.py asgard registrar aula-1 --nombre "Aula 1" --ubicacion "Edificio A"
-    python main.py permiso otorgar ana aula-1
-    python main.py cliente --servidor bifrost.midominio.com --tls --salida servidor.json
-    python main.py sesiones
-    python main.py estado          # ¿está en ejecución?
-    python main.py monitor         # vista en vivo (útil si corre como servicio)
+    python main.py user add ana --name "Ana López"
+    python main.py asgard register room-1 --name "Room 1" --location "Building A"
+    python main.py permission grant ana room-1
+    python main.py client --server bifrost.mydomain.com --tls --output server.json
+    python main.py sessions
+    python main.py status          # is it running?
+    python main.py monitor         # live view (useful when it runs as a service)
 """
 
 from __future__ import annotations
@@ -22,16 +22,17 @@ import socket
 import sys
 from pathlib import Path
 
-from .base_datos import Database, DatabaseError
-from .protocolo import DEFAULT_PORT, format_fingerprint, local_ipv4_addresses
-from .seguridad import certificate_file_fingerprint, generate_self_signed
+from .database import Database, DatabaseError
+from .i18n import tr
+from .protocol import DEFAULT_PORT, format_fingerprint, local_ipv4_addresses
+from .security import certificate_file_fingerprint, generate_self_signed
 
-ADMIN_COMMANDS = ("usuario", "asgard", "permiso", "sesiones", "huella", "certificado", "cliente", "estado", "monitor")
+ADMIN_COMMANDS = ("user", "asgard", "permission", "sessions", "fingerprint", "certificate", "client", "status", "monitor")
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
 
 
 def default_data_dir() -> Path:
-    return Path(os.environ.get("BIFROST_DATOS") or PROGRAM_DIR / "datos")
+    return Path(os.environ.get("BIFROST_DATA") or PROGRAM_DIR / "data")
 
 
 def database_path(data_dir: Path) -> Path:
@@ -39,7 +40,7 @@ def database_path(data_dir: Path) -> Path:
 
 
 def status_path(data_dir: Path) -> Path:
-    return data_dir / "estado.json"
+    return data_dir / "status.json"
 
 
 def log_path(data_dir: Path) -> Path:
@@ -60,7 +61,7 @@ def default_certificate_names() -> list[str]:
 
 
 def ensure_certificate(data_dir: Path, names: list[str] | None = None, force: bool = False) -> tuple[Path, Path, str, bool]:
-    """Devuelve (certificado, clave, huella, creado) generando uno autofirmado si falta."""
+    """Returns (certificate, key, fingerprint, created), generating a self-signed one when missing."""
     cert, key = tls_paths(data_dir)
     created = False
     if force or not cert.exists() or not key.exists():
@@ -70,34 +71,34 @@ def ensure_certificate(data_dir: Path, names: list[str] | None = None, force: bo
 
 
 def _yes(text: str) -> bool:
-    return text.strip().lower() in ("si", "sí", "s", "yes", "y", "1", "true")
+    return text.strip().lower() in ("yes", "y", "si", "sí", "s", "1", "true")
 
 
 def _read_password(from_stdin: bool, confirm: bool = True) -> str:
     if from_stdin:
         return sys.stdin.readline().rstrip("\r\n")
     while True:
-        first = getpass.getpass("Contraseña: ")
+        first = getpass.getpass(tr("Password: "))
         if not confirm:
             return first
-        second = getpass.getpass("Repite la contraseña: ")
+        second = getpass.getpass(tr("Repeat the password: "))
         if first == second:
             return first
-        print("Las contraseñas no coinciden; inténtalo de nuevo.")
+        print(tr("The passwords do not match; try again."))
 
 
 def _confirm(question: str, assume_yes: bool) -> bool:
     if assume_yes:
         return True
     try:
-        return _yes(input(f"{question} [s/N]: "))
+        return _yes(input(tr("{question} [y/N]: ", question=question)))
     except EOFError:
         return False
 
 
 def _print_table(headers: list[str], rows: list[list[str]]) -> None:
     if not rows:
-        print("(sin registros)")
+        print(tr("(no records)"))
         return
     widths = [max(len(str(item)) for item in column) for column in zip(headers, *rows)]
     line = "  ".join(header.ljust(width) for header, width in zip(headers, widths))
@@ -107,95 +108,100 @@ def _print_table(headers: list[str], rows: list[list[str]]) -> None:
         print("  ".join(str(item).ljust(width) for item, width in zip(row, widths)))
 
 
+def _yes_no(value: bool) -> str:
+    return tr("yes") if value else tr("no")
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
-        "--datos",
+        "--data",
         type=Path,
         default=default_data_dir(),
-        help="carpeta de datos de Bifröst (variable BIFROST_DATOS; por defecto ./datos)",
+        help=tr("Bifröst data folder (BIFROST_DATA variable; ./data by default)"),
     )
-    parser = argparse.ArgumentParser(prog="main.py", description="Administración de Bifröst.")
+    parser = argparse.ArgumentParser(prog="main.py", description=tr("Bifröst administration."))
     commands = parser.add_subparsers(dest="command", required=True)
 
-    usuario = commands.add_parser("usuario", help="cuentas de usuario de Midgard")
-    u_sub = usuario.add_subparsers(dest="action", required=True)
-    p = u_sub.add_parser("agregar", parents=[common], help="crea un usuario")
-    p.add_argument("usuario")
-    p.add_argument("--nombre", help="nombre visible (por defecto el usuario)")
-    p.add_argument("--admin", action="store_true", help="administrador: acceso a todos los Asgard")
-    p.add_argument("--clave-stdin", action="store_true", help="lee la contraseña de la entrada estándar")
-    u_sub.add_parser("listar", parents=[common], help="lista los usuarios")
-    p = u_sub.add_parser("eliminar", parents=[common], help="borra un usuario")
-    p.add_argument("usuario")
-    p.add_argument("--si", action="store_true", help="no pedir confirmación")
-    p = u_sub.add_parser("clave", parents=[common], help="cambia la contraseña")
-    p.add_argument("usuario")
-    p.add_argument("--clave-stdin", action="store_true")
-    for action, text in (("activar", "permite el acceso"), ("desactivar", "bloquea el acceso sin borrar")):
+    user = commands.add_parser("user", help=tr("Midgard user accounts"))
+    u_sub = user.add_subparsers(dest="action", required=True)
+    p = u_sub.add_parser("add", parents=[common], help=tr("creates a user"))
+    p.add_argument("username")
+    p.add_argument("--name", help=tr("display name (the username by default)"))
+    p.add_argument("--admin", action="store_true", help=tr("administrator: access to every Asgard"))
+    p.add_argument("--password-stdin", action="store_true", help=tr("reads the password from standard input"))
+    u_sub.add_parser("list", parents=[common], help=tr("lists the users"))
+    p = u_sub.add_parser("remove", parents=[common], help=tr("deletes a user"))
+    p.add_argument("username")
+    p.add_argument("--yes", action="store_true", help=tr("do not ask for confirmation"))
+    p = u_sub.add_parser("password", parents=[common], help=tr("changes the password"))
+    p.add_argument("username")
+    p.add_argument("--password-stdin", action="store_true", help=tr("reads the password from standard input"))
+    for action, text in (("enable", tr("allows access")), ("disable", tr("blocks access without deleting"))):
         p = u_sub.add_parser(action, parents=[common], help=text)
-        p.add_argument("usuario")
-    p = u_sub.add_parser("editar", parents=[common], help="cambia nombre o rol")
-    p.add_argument("usuario")
-    p.add_argument("--nombre")
-    p.add_argument("--admin", choices=("si", "no"))
+        p.add_argument("username")
+    p = u_sub.add_parser("edit", parents=[common], help=tr("changes the name or role"))
+    p.add_argument("username")
+    p.add_argument("--name")
+    p.add_argument("--admin", choices=("yes", "no"))
 
-    asgard = commands.add_parser("asgard", help="dispositivos Asgard registrados")
+    asgard = commands.add_parser("asgard", help=tr("registered Asgard devices"))
     a_sub = asgard.add_subparsers(dest="action", required=True)
-    p = a_sub.add_parser("registrar", parents=[common], help="registra un Asgard y muestra su secreto")
-    p.add_argument("identificador")
-    p.add_argument("--nombre")
-    p.add_argument("--ubicacion", default="")
-    a_sub.add_parser("listar", parents=[common], help="lista los Asgard")
-    p = a_sub.add_parser("eliminar", parents=[common], help="borra un Asgard")
-    p.add_argument("identificador")
-    p.add_argument("--si", action="store_true")
-    p = a_sub.add_parser("secreto", parents=[common], help="genera un secreto nuevo")
-    p.add_argument("identificador")
-    p = a_sub.add_parser("editar", parents=[common], help="cambia nombre, ubicación o estado")
-    p.add_argument("identificador")
-    p.add_argument("--nombre")
-    p.add_argument("--ubicacion")
-    p.add_argument("--activo", choices=("si", "no"))
+    p = a_sub.add_parser("register", parents=[common], help=tr("registers an Asgard and shows its secret"))
+    p.add_argument("device")
+    p.add_argument("--name")
+    p.add_argument("--location", default="")
+    a_sub.add_parser("list", parents=[common], help=tr("lists the Asgard devices"))
+    p = a_sub.add_parser("remove", parents=[common], help=tr("deletes an Asgard"))
+    p.add_argument("device")
+    p.add_argument("--yes", action="store_true", help=tr("do not ask for confirmation"))
+    p = a_sub.add_parser("secret", parents=[common], help=tr("generates a new secret"))
+    p.add_argument("device")
+    p = a_sub.add_parser("edit", parents=[common], help=tr("changes the name, location or state"))
+    p.add_argument("device")
+    p.add_argument("--name")
+    p.add_argument("--location")
+    p.add_argument("--active", choices=("yes", "no"))
 
-    permiso = commands.add_parser("permiso", help="qué usuario entra a qué Asgard")
-    p_sub = permiso.add_subparsers(dest="action", required=True)
-    for action, text in (("otorgar", "da acceso"), ("revocar", "quita acceso")):
-        p = p_sub.add_parser(action, parents=[common], help=f"{text} ('*' = todos los Asgard)")
-        p.add_argument("usuario")
+    permission = commands.add_parser("permission", help=tr("which user may enter which Asgard"))
+    p_sub = permission.add_subparsers(dest="action", required=True)
+    for action, text in (("grant", tr("grants access ('*' = every Asgard)")),
+                         ("revoke", tr("removes access ('*' = every Asgard)"))):
+        p = p_sub.add_parser(action, parents=[common], help=text)
+        p.add_argument("username")
         p.add_argument("asgard")
-    p = p_sub.add_parser("listar", parents=[common], help="lista permisos")
-    p.add_argument("usuario", nargs="?")
+    p = p_sub.add_parser("list", parents=[common], help=tr("lists permissions"))
+    p.add_argument("username", nargs="?")
 
-    p = commands.add_parser("sesiones", parents=[common], help="historial de sesiones")
-    p.add_argument("--limite", type=int, default=20)
+    p = commands.add_parser("sessions", parents=[common], help=tr("session history"))
+    p.add_argument("--limit", type=int, default=20)
 
-    p = commands.add_parser("huella", parents=[common], help="muestra la huella del certificado TLS")
-    p.add_argument("--cert", type=Path, help="certificado propio (por defecto el autofirmado de datos/tls)")
+    p = commands.add_parser("fingerprint", parents=[common], help=tr("shows the TLS certificate fingerprint"))
+    p.add_argument("--cert", type=Path, help=tr("own certificate (the self-signed one in data/tls by default)"))
 
-    p = commands.add_parser("certificado", parents=[common], help="genera el certificado TLS autofirmado")
-    p.add_argument("--nombre-publico", default="", help="dominios o IP separados por comas")
-    p.add_argument("--forzar", action="store_true", help="reemplaza el certificado existente")
+    p = commands.add_parser("certificate", parents=[common], help=tr("generates the self-signed TLS certificate"))
+    p.add_argument("--public-name", default="", help=tr("domains or IP addresses separated by commas"))
+    p.add_argument("--force", action="store_true", help=tr("replaces the existing certificate"))
 
     p = commands.add_parser(
-        "cliente", parents=[common],
-        help="crea servidor.json: el servidor predeterminado de Midgard (los usuarios no escriben nada)",
+        "client", parents=[common],
+        help=tr("creates server.json: Midgard's default server (users type nothing)"),
     )
-    p.add_argument("--servidor", required=True, help="dominio o IP de Bifröst, con :puerto si no es 8765")
-    p.add_argument("--tls", action="store_true", help="Bifröst usa TLS (modo público)")
-    p.add_argument("--cert", type=Path, help="certificado del servidor (por defecto el autofirmado de datos/tls)")
-    p.add_argument("--sin-huella", action="store_true",
-                   help="no fijar la huella (certificados de Let's Encrypt u otra autoridad, que se renuevan)")
-    p.add_argument("--nombre", default="", help="nombre del servidor que verán los usuarios")
-    p.add_argument("--salida", type=Path, help="archivo a escribir (por defecto se muestra en pantalla)")
+    p.add_argument("--server", required=True, help=tr("Bifröst domain or IP, with :port when it is not 8765"))
+    p.add_argument("--tls", action="store_true", help=tr("Bifröst uses TLS (public mode)"))
+    p.add_argument("--cert", type=Path, help=tr("server certificate (the self-signed one in data/tls by default)"))
+    p.add_argument("--no-fingerprint", action="store_true",
+                   help=tr("do not pin the fingerprint (Let's Encrypt or other authority certificates, which are renewed)"))
+    p.add_argument("--name", default="", help=tr("server name the users will see"))
+    p.add_argument("--output", type=Path, help=tr("file to write (shown on screen by default)"))
 
-    commands.add_parser("estado", parents=[common], help="indica si Bifröst está en ejecución y con qué conexiones")
-    commands.add_parser("monitor", parents=[common], help="vista en vivo del servidor (estado y registro)")
+    commands.add_parser("status", parents=[common], help=tr("tells whether Bifröst is running and with which connections"))
+    commands.add_parser("monitor", parents=[common], help=tr("live view of the server (status and log)"))
     return parser
 
 
 def parse_server(text: str) -> tuple[str, int]:
-    """'host', 'host:puerto' o '[ipv6]:puerto'."""
+    """'host', 'host:port' or '[ipv6]:port'."""
     value = text.strip()
     if value.startswith("["):
         host, _, rest = value[1:].partition("]")
@@ -207,160 +213,165 @@ def parse_server(text: str) -> tuple[str, int]:
 
 
 def client_file(args: argparse.Namespace) -> int:
-    """Archivo de conexión para Midgard: con él, el usuario solo escribe su usuario y contraseña."""
+    """Connection file for Midgard: with it, users only type their username and password."""
     try:
-        host, port = parse_server(args.servidor)
+        host, port = parse_server(args.server)
     except ValueError:
-        print("Error: el puerto de --servidor debe ser un número.", file=sys.stderr)
+        print(tr("Error: the port in --server must be a number."), file=sys.stderr)
         return 1
-    data: dict[str, object] = {"servidor": host, "puerto": port, "tls": bool(args.tls)}
-    if args.tls and not args.sin_huella:
-        cert = args.cert or tls_paths(args.datos)[0]
+    data: dict[str, object] = {"server": host, "port": port, "tls": bool(args.tls)}
+    if args.tls and not args.no_fingerprint:
+        cert = args.cert or tls_paths(args.data)[0]
         if not cert.exists():
-            print(f"Error: no existe {cert}. Inicia Bifröst en modo público una vez (crea el certificado) "
-                  "o usa --sin-huella si el certificado es de Let's Encrypt.", file=sys.stderr)
+            print(tr("Error: {path} does not exist. Start Bifröst in public mode once (it creates the certificate) "
+                     "or use --no-fingerprint if the certificate comes from Let's Encrypt.", path=cert), file=sys.stderr)
             return 1
-        data["huella"] = format_fingerprint(certificate_file_fingerprint(cert))
-    if args.nombre:
-        data["nombre"] = args.nombre
+        data["fingerprint"] = format_fingerprint(certificate_file_fingerprint(cert))
+    if args.name:
+        data["name"] = args.name
     text = json.dumps(data, ensure_ascii=False, indent=2)
-    if not args.salida:
+    if not args.output:
         print(text)
         return 0
-    args.salida.write_text(text + "\n", encoding="utf-8")
-    print(f"Archivo de conexión creado: {args.salida}")
-    print("Cópialo junto al instalador de Midgard (Midgard/servidor.json) antes de instalar o de")
-    print("construir el ejecutable: Midgard se conectará solo a este servidor.")
+    args.output.write_text(text + "\n", encoding="utf-8")
+    print(tr("Connection file created: {path}", path=args.output))
+    print(tr("Copy it next to Midgard's installer (Midgard/server.json) before installing or"))
+    print(tr("building the executable: Midgard will connect to this server by itself."))
     return 0
 
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
-    data_dir: Path = args.datos
-    if args.command in ("estado", "monitor"):
-        from .consola import monitor, mostrar_estado
+    data_dir: Path = args.data
+    if args.command in ("status", "monitor"):
+        from .console import monitor, show_status
 
-        if args.command == "estado":
-            return mostrar_estado(status_path(data_dir))
+        if args.command == "status":
+            return show_status(status_path(data_dir))
         return monitor(status_path(data_dir), log_path(data_dir))
-    if args.command == "cliente":
+    if args.command == "client":
         return client_file(args)
     try:
-        if args.command == "huella":
+        if args.command == "fingerprint":
             cert = args.cert or tls_paths(data_dir)[0]
             if not cert.exists():
-                print(f"No existe {cert}. Genera uno con: python main.py certificado")
+                print(tr("{path} does not exist. Generate one with: python main.py certificate", path=cert))
                 return 1
             print(format_fingerprint(certificate_file_fingerprint(cert)))
             return 0
-        if args.command == "certificado":
-            names = [name.strip() for name in args.nombre_publico.split(",") if name.strip()]
+        if args.command == "certificate":
+            names = [name.strip() for name in args.public_name.split(",") if name.strip()]
             cert, key = tls_paths(data_dir)
-            if cert.exists() and not args.forzar:
-                print(f"Ya existe {cert}. Usa --forzar para reemplazarlo (los clientes deberán confiar en la nueva huella).")
+            if cert.exists() and not args.force:
+                print(tr("{path} already exists. Use --force to replace it (clients will have to trust the new fingerprint).",
+                         path=cert))
                 return 1
             _, _, fingerprint, _ = ensure_certificate(data_dir, names or None, force=True)
-            print(f"Certificado: {cert}\nClave:       {key}\nHuella SHA-256: {format_fingerprint(fingerprint)}")
+            print(tr("Certificate: {cert}\nKey:         {key}\nSHA-256 fingerprint: {fingerprint}",
+                     cert=cert, key=key, fingerprint=format_fingerprint(fingerprint)))
             return 0
 
         db = Database(database_path(data_dir))
-        if args.command == "usuario":
+        if args.command == "user":
             return _users(db, args)
         if args.command == "asgard":
             return _asgards(db, args)
-        if args.command == "permiso":
+        if args.command == "permission":
             return _permissions(db, args)
-        if args.command == "sesiones":
+        if args.command == "sessions":
             rows = [
-                [s.started, s.ended or "(activa)", s.username, s.device_id, s.address, s.reason or ""]
-                for s in db.recent_sessions(args.limite)
+                [s.started, s.ended or tr("(active)"), s.username, s.device_id, s.address, s.reason or ""]
+                for s in db.recent_sessions(args.limit)
             ]
-            _print_table(["Inicio (UTC)", "Fin (UTC)", "Usuario", "Asgard", "Dirección", "Motivo"], rows)
+            _print_table([tr("Start (UTC)"), tr("End (UTC)"), tr("User"), "Asgard", tr("Address"), tr("Reason")], rows)
             return 0
     except DatabaseError as error:
-        print(f"Error: {error}", file=sys.stderr)
+        print(tr("Error: {error}", error=error), file=sys.stderr)
         return 1
     return 0
 
 
 def _users(db: Database, args: argparse.Namespace) -> int:
-    if args.action == "agregar":
-        password = _read_password(args.clave_stdin)
-        user = db.add_user(args.usuario, password, args.nombre, args.admin)
-        role = "administrador" if user.is_admin else "usuario"
-        print(f"Usuario '{user.username}' creado ({role}).")
-        if not user.is_admin:
-            print(f"Dale acceso con: python main.py permiso otorgar {user.username} <asgard|*>")
-        print("Midgard se conecta solo a este servidor en la red local; para Internet entrega a los usuarios")
-        print("un Midgard con servidor.json (python main.py cliente --servidor <dominio> --tls --salida servidor.json).")
-    elif args.action == "listar":
+    if args.action == "add":
+        password = _read_password(args.password_stdin)
+        user = db.add_user(args.username, password, args.name, args.admin)
+        if user.is_admin:
+            print(tr("User '{name}' created (administrator).", name=user.username))
+        else:
+            print(tr("User '{name}' created (user).", name=user.username))
+            print(tr("Give them access with: python main.py permission grant {name} <asgard|*>", name=user.username))
+        print(tr("Midgard finds this server by itself on the local network; for the Internet give users"))
+        print(tr("a Midgard with server.json (python main.py client --server <domain> --tls --output server.json)."))
+    elif args.action == "list":
         rows = []
         for user in db.list_users():
-            access = "todos" if user.is_admin or user.full_access else "por permiso"
+            access = tr("all") if user.is_admin or user.full_access else tr("by permission")
             rows.append(
-                [user.username, user.display_name, "sí" if user.is_admin else "no", access,
-                 "sí" if user.active else "no", user.last_login or "nunca"]
+                [user.username, user.display_name, _yes_no(user.is_admin), access,
+                 _yes_no(user.active), user.last_login or tr("never")]
             )
-        _print_table(["Usuario", "Nombre", "Admin", "Acceso", "Activo", "Último acceso (UTC)"], rows)
-    elif args.action == "eliminar":
-        if not _confirm(f"¿Eliminar al usuario '{args.usuario}'?", args.si):
-            print("Cancelado.")
+        _print_table([tr("User"), tr("Name"), "Admin", tr("Access"), tr("Active"), tr("Last sign-in (UTC)")], rows)
+    elif args.action == "remove":
+        if not _confirm(tr("Delete the user '{name}'?", name=args.username), args.yes):
+            print(tr("Cancelled."))
             return 1
-        db.delete_user(args.usuario)
-        print("Usuario eliminado.")
-    elif args.action == "clave":
-        db.set_password(args.usuario, _read_password(args.clave_stdin))
-        print("Contraseña actualizada.")
-    elif args.action in ("activar", "desactivar"):
-        db.set_user_flags(args.usuario, active=args.action == "activar")
-        print(f"Usuario {'activado' if args.action == 'activar' else 'desactivado'}.")
-    elif args.action == "editar":
-        admin = None if args.admin is None else args.admin == "si"
-        user = db.set_user_flags(args.usuario, admin=admin, display_name=args.nombre)
-        print(f"Usuario '{user.username}' actualizado.")
+        db.delete_user(args.username)
+        print(tr("User deleted."))
+    elif args.action == "password":
+        db.set_password(args.username, _read_password(args.password_stdin))
+        print(tr("Password updated."))
+    elif args.action in ("enable", "disable"):
+        db.set_user_flags(args.username, active=args.action == "enable")
+        print(tr("User enabled.") if args.action == "enable" else tr("User disabled."))
+    elif args.action == "edit":
+        admin = None if args.admin is None else args.admin == "yes"
+        user = db.set_user_flags(args.username, admin=admin, display_name=args.name)
+        print(tr("User '{name}' updated.", name=user.username))
     return 0
 
 
 def _asgards(db: Database, args: argparse.Namespace) -> int:
-    if args.action == "registrar":
-        record, secret = db.register_asgard(args.identificador, args.nombre or args.identificador, args.ubicacion)
-        print(f"Asgard '{record.device_id}' registrado como \"{record.name}\".")
-        print("Secreto del dispositivo (guárdalo; no se volverá a mostrar):")
+    if args.action == "register":
+        record, secret = db.register_asgard(args.device, args.name or args.device, args.location)
+        print(tr('Asgard \'{device}\' registered as "{name}".', device=record.device_id, name=record.name))
+        print(tr("Device secret (keep it; it will not be shown again):"))
         print(f"\n    {secret}\n")
-        print("Configúralo en el Asgard con:")
-        print(f"    ./instalar.sh --dispositivo {record.device_id} --secreto {secret} --servidor <IP de Bifröst>")
-    elif args.action == "listar":
+        print(tr("Configure it on the Asgard with:"))
+        print(f"    ./install.sh --device {record.device_id} --secret {secret} --server <{tr('Bifröst IP')}>")
+    elif args.action == "list":
         rows = [
-            [r.device_id, r.name, r.location, "sí" if r.active else "no", r.last_seen or "nunca"]
+            [r.device_id, r.name, r.location, _yes_no(r.active), r.last_seen or tr("never")]
             for r in db.list_asgards()
         ]
-        _print_table(["Identificador", "Nombre", "Ubicación", "Activo", "Última conexión (UTC)"], rows)
-    elif args.action == "eliminar":
-        if not _confirm(f"¿Eliminar el Asgard '{args.identificador}'?", args.si):
-            print("Cancelado.")
+        _print_table([tr("Identifier"), tr("Name"), tr("Location"), tr("Active"), tr("Last connection (UTC)")], rows)
+    elif args.action == "remove":
+        if not _confirm(tr("Delete the Asgard '{device}'?", device=args.device), args.yes):
+            print(tr("Cancelled."))
             return 1
-        db.delete_asgard(args.identificador)
-        print("Asgard eliminado.")
-    elif args.action == "secreto":
-        secret = db.regenerate_secret(args.identificador)
-        print("Nuevo secreto (actualízalo en el asgard.ini del dispositivo):")
+        db.delete_asgard(args.device)
+        print(tr("Asgard deleted."))
+    elif args.action == "secret":
+        secret = db.regenerate_secret(args.device)
+        print(tr("New secret (update it in the device's asgard.ini):"))
         print(f"\n    {secret}\n")
-    elif args.action == "editar":
-        active = None if args.activo is None else args.activo == "si"
-        record = db.update_asgard(args.identificador, name=args.nombre, location=args.ubicacion, active=active)
-        print(f"Asgard '{record.device_id}' actualizado.")
+    elif args.action == "edit":
+        active = None if args.active is None else args.active == "yes"
+        record = db.update_asgard(args.device, name=args.name, location=args.location, active=active)
+        print(tr("Asgard '{device}' updated.", device=record.device_id))
     return 0
 
 
 def _permissions(db: Database, args: argparse.Namespace) -> int:
-    if args.action == "otorgar":
-        db.grant(args.usuario, args.asgard)
-        target = "a todos los Asgard" if args.asgard == "*" else f"al Asgard '{args.asgard}'"
-        print(f"'{args.usuario}' ahora puede entrar {target}.")
-    elif args.action == "revocar":
-        db.revoke(args.usuario, args.asgard)
-        print("Permiso revocado.")
+    if args.action == "grant":
+        db.grant(args.username, args.asgard)
+        if args.asgard == "*":
+            print(tr("'{name}' may now enter every Asgard.", name=args.username))
+        else:
+            print(tr("'{name}' may now enter the Asgard '{device}'.", name=args.username, device=args.asgard))
+    elif args.action == "revoke":
+        db.revoke(args.username, args.asgard)
+        print(tr("Permission revoked."))
     else:
-        rows = [[user, "(todos)" if device == "*" else device] for user, device in db.permissions(args.usuario)]
-        _print_table(["Usuario", "Asgard"], rows)
+        rows = [[user, tr("(all)") if device == "*" else device] for user, device in db.permissions(args.username)]
+        _print_table([tr("User"), "Asgard"], rows)
     return 0

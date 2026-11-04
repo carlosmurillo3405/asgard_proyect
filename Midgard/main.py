@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Midgard: cliente de usuario multiplataforma del sistema Asgard.
+"""Midgard: cross-platform user client of the Asgard system.
 
-Uso::
+Usage::
 
-    python main.py                                   # servidor automático (servidor.json o red local)
-    python main.py --usuario ana
-    python main.py --servidor bifrost.midominio.com --tls   # servidor fijado a mano
+    python main.py                                   # automatic server (server.json or local network)
+    python main.py --user ana
+    python main.py --server bifrost.mydomain.com --tls     # server set by hand
+    python main.py --language es                     # interface language for this run
 
-Consulta README.md para la guía completa.
+See README.md for the full guide.
 """
 
 from __future__ import annotations
@@ -20,8 +21,10 @@ import platform
 import sys
 
 from midgard import __version__
-from midgard.ajustes import config_dir, load_settings
-from midgard.protocolo import DEFAULT_PORT
+from midgard.i18n import SETTINGS as LANGUAGE_SETTINGS
+from midgard.i18n import set_language, tr
+from midgard.protocol import DEFAULT_PORT
+from midgard.settings import Settings, config_dir, load_settings
 
 
 def _utf8_output() -> None:
@@ -37,29 +40,41 @@ def _utf8_output() -> None:
 
 
 def _windows_app_id() -> None:
-    """En Windows, la barra de tareas muestra el icono de Midgard (no el de Python)."""
+    """On Windows, the taskbar shows Midgard's icon (not Python's)."""
     if platform.system() != "Windows":
         return
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SistemaAsgard.Midgard")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AsgardSystem.Midgard")
     except Exception:
         pass
 
 
+def _language_option(argv: list[str]) -> str | None:
+    """Value of --language before argparse runs (so the help is already translated)."""
+    for index, item in enumerate(argv):
+        if item == "--language" and index + 1 < len(argv):
+            return argv[index + 1]
+        if item.startswith("--language="):
+            return item.split("=", 1)[1]
+    return None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="main.py", description="Midgard: controla un Asgard a través de Bifröst.")
-    parser.add_argument("--servidor", help="host[:puerto] de Bifröst (fija el servidor a mano)")
-    parser.add_argument("--automatico", action="store_true",
-                        help="vuelve al servidor automático (servidor.json o red local)")
-    parser.add_argument("--tls", action="store_true", help="usar conexión cifrada (Bifröst en modo público)")
-    parser.add_argument("--huella", help="huella SHA-256 del certificado de Bifröst")
-    parser.add_argument("--usuario", help="usuario a mostrar en el acceso")
-    parser.add_argument("--sin-audio", action="store_true", help="no abrir micrófono ni altavoz")
-    parser.add_argument("--listar-audio", action="store_true", help="muestra los dispositivos de audio y sale")
-    parser.add_argument("--comprobar", action="store_true", help="verifica las dependencias sin abrir la ventana")
-    parser.add_argument("--registro", default="info", choices=("debug", "info", "warning", "error"))
+    parser = argparse.ArgumentParser(prog="main.py", description=tr("Midgard: controls an Asgard through Bifröst."))
+    parser.add_argument("--server", help=tr("Bifröst's host[:port] (sets the server by hand)"))
+    parser.add_argument("--automatic", action="store_true",
+                        help=tr("goes back to the automatic server (server.json or local network)"))
+    parser.add_argument("--tls", action="store_true", help=tr("use an encrypted connection (Bifröst in public mode)"))
+    parser.add_argument("--fingerprint", help=tr("SHA-256 fingerprint of Bifröst's certificate"))
+    parser.add_argument("--user", help=tr("username to show on the sign-in screen"))
+    parser.add_argument("--language", choices=LANGUAGE_SETTINGS,
+                        help=tr("interface language for this run (auto = the system's)"))
+    parser.add_argument("--no-audio", action="store_true", help=tr("do not open the microphone or the speaker"))
+    parser.add_argument("--list-audio", action="store_true", help=tr("shows the audio devices and exits"))
+    parser.add_argument("--check", action="store_true", help=tr("checks the dependencies without opening the window"))
+    parser.add_argument("--log-level", default="info", choices=("debug", "info", "warning", "error"))
     parser.add_argument("--version", action="version", version=f"Midgard {__version__}")
     return parser.parse_args(argv)
 
@@ -83,49 +98,69 @@ def setup_logging(level: str, console: bool = True) -> None:
 
 
 def check_installation() -> int:
-    """Importa todo lo que usa Midgard y lo informa (consola y midgard.log)."""
+    """Imports everything Midgard uses and reports it (console and midgard.log)."""
     log = logging.getLogger("midgard")
+    ok, fail, warning = "OK     ", tr("FAIL   "), tr("note   ")
     problems = 0
     checks = [
-        ("Interfaz (Qt)", "from midgard import qt; detalle = qt.description()"),
+        (tr("Interface (Qt)"), "from midgard import qt; detail = qt.description()"),
         ("OpenCV", "import cv2"),
         ("NumPy", "import numpy"),
         ("Pillow", "import PIL.Image"),
-        ("Audio (sounddevice/PortAudio)", "import sounddevice; sounddevice.query_devices()"),
-        ("Captura de pantalla (MSS)", "import mss"),
-        ("Cifrado (cryptography)", "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
-        ("Midgard", "import midgard.interfaz, midgard.sesion"),
+        (tr("Audio (sounddevice/PortAudio)"), "import sounddevice; sounddevice.query_devices()"),
+        (tr("Screen capture (MSS)"), "import mss"),
+        (tr("Encryption (cryptography)"), "from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305"),
+        ("Midgard", "import midgard.ui, midgard.session"),
     ]
     for label, statement in checks:
         namespace: dict[str, object] = {}
         try:
             exec(statement, namespace)
-            detail = namespace.get("detalle")
-            message = f"OK     {label}" + (f": {detail}" if detail else "")
+            detail = namespace.get("detail")
+            message = f"{ok}{label}" + (f": {detail}" if detail else "")
         except Exception as error:  # se informa cualquier fallo de importación
             problems += 1
-            message = f"FALLA  {label}: {error}"
+            message = f"{fail}{label}: {error}"
         log.info(message)
         if sys.stdout is not None:
             print(message)
-    from midgard.conexion import load_provisioning
+    from midgard.connection import load_provisioning
 
     choice = load_provisioning()
-    message = (f"OK     Servidor predeterminado: {choice.describe()}" if choice
-               else "aviso  Sin servidor.json: se buscará Bifröst en la red local")
+    if choice:
+        message = ok + tr("Default server: {server}", server=choice.describe())
+    else:
+        message = warning + tr("No server.json: Bifröst will be looked for on the local network")
     log.info(message)
     if sys.stdout is not None:
         print(message)
     return 1 if problems else 0
 
 
+def _apply_server(settings: Settings, args: argparse.Namespace) -> None:
+    if args.server:
+        host, _, port = args.server.rpartition(":") if args.server.count(":") == 1 else (args.server, "", "")
+        settings.server_mode = "manual"
+        settings.host = host or args.server
+        settings.port = int(port) if port.isdigit() else DEFAULT_PORT
+        settings.tls = args.tls
+        settings.fingerprint = args.fingerprint or ""
+    elif args.automatic:
+        settings.server_mode = "auto"
+    if args.user:
+        settings.username = args.user
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_output()
+    argv = sys.argv[1:] if argv is None else argv
+    settings = load_settings()
+    set_language(_language_option(argv) or settings.language)
     args = parse_args(argv)
-    if args.comprobar:
+    if args.check:
         setup_logging("info", console=False)
         return check_installation()
-    if args.listar_audio:
+    if args.list_audio:
         from midgard.audio import AudioDeviceError, print_devices
 
         try:
@@ -134,27 +169,16 @@ def main(argv: list[str] | None = None) -> int:
             print(error)
             return 1
         return 0
-    setup_logging(args.registro)
-    settings = load_settings()
-    if args.servidor:
-        host, _, port = args.servidor.rpartition(":") if args.servidor.count(":") == 1 else (args.servidor, "", "")
-        settings.server_mode = "manual"
-        settings.host = host or args.servidor
-        settings.port = int(port) if port.isdigit() else DEFAULT_PORT
-        settings.tls = args.tls
-        settings.fingerprint = args.huella or ""
-    elif args.automatico:
-        settings.server_mode = "auto"
-    if args.usuario:
-        settings.username = args.usuario
+    setup_logging(args.log_level)
+    _apply_server(settings, args)
 
     _windows_app_id()
-    from midgard.interfaz import ejecutar
-    from midgard.sesion import MidgardController
+    from midgard.session import MidgardController
+    from midgard.ui import run
 
-    controller = MidgardController(settings, use_audio_devices=not args.sin_audio)
+    controller = MidgardController(settings, use_audio_devices=not args.no_audio)
     try:
-        return ejecutar(controller, settings)
+        return run(controller, settings)
     except KeyboardInterrupt:
         controller.shutdown()
         return 0

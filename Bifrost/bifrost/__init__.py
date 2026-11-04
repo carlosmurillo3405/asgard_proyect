@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
-"""Bifröst: servidor puente del sistema Asgard."""
+"""Bifröst: the bridge server of the Asgard system."""
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"

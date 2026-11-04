@@ -1,218 +1,225 @@
-# Asgard — cliente dedicado del aula (Raspberry Pi)
+# Asgard — dedicated classroom client (Raspberry Pi)
 
-Asgard es el equipo que está en el aula. Funciona solo, sin que nadie lo opere:
+**English** · [Español](README.es.md)
 
-- Permanece **siempre conectado a Bifröst**, en reposo y con la cámara y el micrófono apagados, esperando a un usuario válido.
-- Cuando un usuario de **Midgard** con permiso abre una sesión, pasa a **modo activo**: enciende la cámara y empieza a emitir **audio y video en máxima calidad**. Midgard no puede bajar esa calidad.
-- Recibe y muestra en su pantalla la **pantalla compartida** y la **cámara** del usuario, reproduce su **voz** y muestra sus **mensajes de chat**.
-- Mueve la cámara con **dos servos (pan/tilt)**: a mano, fija en un punto elegido o **siguiendo con IA** a la persona indicada.
-- Acciona el **actuador de la mano** cuando el usuario la levanta.
-- No comparte pantalla; solo recibe la de Midgard.
-- Al terminar la sesión vuelve a reposo: apaga cámara y micrófono, baja la mano y estaciona los servos.
+Asgard is the device that sits in the classroom. It works by itself, with nobody operating it:
 
-## Pantalla del aula
+- It stays **always connected to Bifröst**, idle and with the camera and microphone off, waiting for a valid user.
+- When a **Midgard** user with permission opens a session, it switches to **active mode**: it turns the camera on and starts streaming **audio and video in top quality**. Midgard cannot lower that quality.
+- It receives and shows on its screen the user's **shared screen** and **camera**, plays their **voice** and shows their **chat messages**.
+- It moves the camera with **two servos (pan/tilt)**: by hand, fixed on a chosen point or **following with AI** the chosen person.
+- It drives the **hand actuator** when the user raises it.
+- It does not share its screen; it only receives Midgard's.
+- When the session ends it goes back to idle: it turns the camera and microphone off, lowers the hand and parks the servos.
 
-La pantalla sigue la plantilla de diseño «UI-Asgard» (tema oscuro, Inter, logotipo y runas), se adapta a cualquier tamaño y orientación (monitor, televisión 4K, proyector o pantalla vertical) y anima todos sus cambios. Está hecha con Qt: PyQt6 o PyQt5 de Raspberry Pi OS, o PySide6.
+## Classroom screen
 
-- **Reposo** (esperando una conexión): el logotipo «respira» sobre el patrón de runas, con el nombre y la ubicación del Asgard, «Esperando la conexión de un usuario…» y el estado del enlace con Bifröst (conectado, buscando el servidor o sin conexión). Abajo, la hora.
-- **Sesión** (pantalla completa, al conectarse un usuario):
-  - **Usuario**: nombre (y `@usuario`), foto de perfil si la puso en Midgard, y su **estado** (Conectado / Reconectando…) junto con indicadores de **pantalla compartida**, micrófono y cámara.
-  - **Pantalla compartida**: la pantalla del usuario en grande cuando la comparte (con su cámara en miniatura); si solo envía su cámara, se muestra la cámara; si no comparte nada, lo indica.
-  - **Mano**: «Mano abajo» o «Mano levantada · desde las 10:32»; al levantarse, la tarjeta se ilumina y el icono late.
-  - **Mensajes**: los mensajes que envía desde Midgard, con hora; cada uno entra con un fundido y la tarjeta destella.
-  - Arriba: duración de la sesión y hora. Avisos breves cuando el usuario se conecta, pierde la conexión, etc.
-- Con `[pantalla] diagnostico = si` aparece al pie una línea técnica (modo de cámara, pan/tilt, IA, audio y video).
+The screen follows the «UI-Asgard» design template (dark theme, Inter, logo and runes), adapts to any size and orientation (monitor, 4K TV, projector or vertical screen) and animates all its changes. It is built with Qt: Raspberry Pi OS's PyQt6 or PyQt5, or PySide6. It is in English and Spanish: `[screen] language = auto` (the system language), `en` or `es`.
 
-Atajos: **F11** alterna la pantalla completa y **Ctrl+Q** cierra. En pantalla completa el puntero se oculta.
+- **Idle** (waiting for a connection): the logo «breathes» over the rune pattern, with the Asgard's name and location, «Waiting for a user to connect» and the status of the link with Bifröst (connected, looking for the server or without connection). The time at the bottom.
+- **Session** (full screen, when a user connects):
+  - **User**: name (and `@username`), profile photo if they set one in Midgard, and their **status** (Connected / Reconnecting…) together with **shared screen**, microphone and camera indicators.
+  - **Shared screen**: the user's screen in large when they share it (with their camera as a thumbnail); when they only send their camera, the camera is shown; when they share nothing, it says so.
+  - **Hand**: «Hand down» or «Hand raised · since 10:32»; when raised, the card lights up and the icon pulses.
+  - **Messages**: the messages they send from Midgard, with the time; each one fades in and the card flashes.
+  - At the top: session duration and time. Brief notices when the user connects, loses the connection, and so on.
+- With `[screen] diagnostics = yes` a technical line appears at the bottom (camera mode, pan/tilt, AI, audio and video).
+
+Shortcuts: **F11** toggles full screen and **Ctrl+Q** closes. In full screen the pointer is hidden.
 
 ## Hardware
 
-| Componente | Recomendado | Notas |
+| Component | Recommended | Notes |
 | --- | --- | --- |
-| Computadora | Raspberry Pi 5 o 4 (4 GB+) con **Raspberry Pi OS de 64 bits** | MediaPipe necesita 64 bits. |
-| Cámara | USB (UVC, MJPG 1080p) o Camera Module (CSI) | `camara = 0` o `camara = picamera2`. |
-| Servos pan/tilt | 2 servos (SG90, MG90S, MG996R…) en soporte pan/tilt | Mediante un **ESP32 por USB (recomendado)**, un PCA9685 o directo a GPIO. |
-| Mano | 1 servo, o un relé/solenoide | `[mano] tipo = servo` o `gpio`. |
-| Audio | Micrófono USB (o de conferencia) y altavoz | Mejor un altavoz-micrófono con cancelación de eco. |
-| Pantalla | Monitor o proyector HDMI | Opcional (`modo = ninguna`). |
+| Computer | Raspberry Pi 5 or 4 (4 GB+) with **64-bit Raspberry Pi OS** | MediaPipe needs 64 bits. |
+| Camera | USB (UVC, MJPG 1080p) or Camera Module (CSI) | `camera = 0` or `camera = picamera2`. |
+| Pan/tilt servos | 2 servos (SG90, MG90S, MG996R…) on a pan/tilt mount | Through an **ESP32 over USB (recommended)**, a PCA9685 or straight to GPIO. |
+| Hand | 1 servo, or a relay/solenoid | `[hand] type = servo` or `gpio`. |
+| Audio | USB (or conference) microphone and speaker | Better a speakerphone with echo cancellation. |
+| Screen | HDMI monitor or projector | Optional (`mode = none`). |
 
-### Conexiones (valores predeterminados)
+### Wiring (default values)
 
-| Señal | GPIO (BCM) | Pin físico |
+| Signal | GPIO (BCM) | Physical pin |
 | --- | --- | --- |
-| Servo pan (horizontal) | GPIO 17 | 11 |
-| Servo tilt (vertical) | GPIO 27 | 13 |
-| Mano (servo o relé) | GPIO 22 | 15 |
+| Pan servo (horizontal) | GPIO 17 | 11 |
+| Tilt servo (vertical) | GPIO 27 | 13 |
+| Hand (servo or relay) | GPIO 22 | 15 |
 | PCA9685 SDA / SCL | GPIO 2 / GPIO 3 | 3 / 5 |
-| PCA9685 VCC (lógica) | 3,3 V | 1 |
+| PCA9685 VCC (logic) | 3.3 V | 1 |
 
-> **Alimenta los servos con una fuente externa de 5–6 V** y une su GND con el de la Raspberry (o del ESP32). Un servo que se alimenta del pin de 5 V de la Pi puede reiniciarla o dañarla.
+> **Power the servos from an external 5–6 V supply** and join its GND with the Raspberry Pi's (or the ESP32's). A servo powered from the Pi's 5 V pin can reset or damage it.
 
-- **Directo a GPIO (`gpiozero`)**: sin `pigpio` el pulso se genera por software y varía cuando la CPU está ocupada con la IA y el video: los servos tiemblan o se mueven solos. Al arrancar, Asgard lo avisa en el registro. Sirve para pruebas; para el aula usa un ESP32 o un PCA9685.
-- **Raspberry Pi 5**: no admite `pigpio`. **Raspberry Pi 4 o anterior**: con `--pigpio` el GPIO directo usa PWM por hardware.
-- **PCA9685**: activa I2C con `sudo raspi-config` → *Interface Options* → *I2C*.
+- **Straight to GPIO (`gpiozero`)**: without `pigpio` the pulse is generated in software and varies when the CPU is busy with the AI and the video: the servos jitter or move by themselves. At start-up Asgard warns about it in the log. Fine for testing; for the classroom use an ESP32 or a PCA9685.
+- **Raspberry Pi 5**: does not support `pigpio`. **Raspberry Pi 4 or older**: with `--pigpio` direct GPIO uses hardware PWM.
+- **PCA9685**: enable I2C with `sudo raspi-config` → *Interface Options* → *I2C*.
 
-### Conexión con ESP32 (recomendada)
+### ESP32 wiring (recommended)
 
-El ESP32 genera los pulsos de los tres servos con PWM por hardware y recibe las posiciones de la Raspberry por USB. El firmware y cómo cargarlo están en [Asgard/Firmware](../Firmware/README.md). Configuración: `./instalar.sh --servos esp32`, o en `asgard.ini` `[servos] controlador = esp32` (la mano usa el mismo ESP32, canal 2).
+The ESP32 generates the pulses of the three servos with hardware PWM and receives the positions from the Raspberry Pi over USB. The firmware and how to flash it are in [Asgard/Firmware](../Firmware/README.md). Configuration: `./install.sh --servos esp32`, or in `asgard.ini` `[servos] driver = esp32` (the hand uses the same ESP32, channel 2).
 
 ```
- Fuente 5–6 V (≥ 1 A por servo) ─┬───────────────────── + rojo de los 3 servos
+ 5–6 V supply (≥ 1 A per servo) ─┬───────────────────── + red of the 3 servos
                                  = 1000 µF + 100 nF
- GND de la fuente ───────────────●───────────────────── − café/negro de los 3 servos
-                                 │  punto único de tierra, junto a los servos
-                                 └───────────────────── GND del ESP32
- ESP32 GPIO 25 ──[ 330 Ω ]──┬─────────────────────────── señal pan (naranja)
+ Supply GND ─────────────────────●───────────────────── − brown/black of the 3 servos
+                                 │  single ground point, next to the servos
+                                 └───────────────────── ESP32 GND
+ ESP32 GPIO 25 ──[ 330 Ω ]──┬─────────────────────────── pan signal (orange)
                             └─[ 10 kΩ ]─ GND
- ESP32 GPIO 26 ──[ 330 Ω ]── … señal tilt     ESP32 GPIO 27 ──[ 330 Ω ]── … señal mano
- ESP32 USB ───────────────────────────────────────────── USB de la Raspberry (datos y 5 V del ESP32)
+ ESP32 GPIO 26 ──[ 330 Ω ]── … tilt signal    ESP32 GPIO 27 ──[ 330 Ω ]── … hand signal
+ ESP32 USB ───────────────────────────────────────────── Raspberry Pi USB (data and the ESP32's 5 V)
 ```
 
-- **Corriente de los servos.** Debe volver a la fuente por sus propios cables, cortos y gruesos (22 AWG o más). No debe pasar por el ESP32, la Raspberry, el cable USB ni las pistas de una protoboard. Si pasa, cada movimiento hace «rebotar» la tierra de la lógica, y en el osciloscopio parece ruido de la Raspberry.
-- **Alimentación del ESP32.** Aliméntalo por el USB de la Raspberry. Si toma energía de la fuente de los servos, cada arranque de motor le baja el voltaje y se reinicia: Asgard lo registra como «caída de voltaje». No conectes el +5 V de la fuente al pin 5V/VIN mientras el USB esté conectado.
-- **Capacitor.** Pon de 470 a 1000 µF (10 V o más) en los bornes de los servos, más uno cerámico de 100 nF. Absorbe los picos de arranque (cada servo de 1,8 kg·cm pide hasta 0,7–1 A al arrancar o bloquearse).
-- **Resistencias de la señal.** La de 330 Ω en serie amortigua el rebote del cable. La de 10 kΩ a GND mantiene la señal en bajo mientras el ESP32 arranca.
-- **Nivel de 3,3 V.** Los servos SG90 y MG90S lo aceptan. Si con 6 V alguno no responde bien, aliméntalos a 5 V o usa un adaptador de nivel (74AHCT125).
-- **Topes mecánicos.** No dejes un servo empujando contra su tope: consume la corriente máxima y calienta. Ajusta `pan_min`/`pan_max`/`tilt_min`/`tilt_max` y, si hace falta, `pulso_min_us`/`pulso_max_us`.
+- **Servo current.** It must return to the supply through its own short, thick wires (22 AWG or thicker). It must not go through the ESP32, the Raspberry Pi, the USB cable or the tracks of a breadboard. If it does, every movement makes the logic ground «bounce», and on the oscilloscope it looks like noise from the Raspberry Pi.
+- **ESP32 power.** Power it from the Raspberry Pi's USB. When it takes power from the servo supply, every motor start drops its voltage and it resets: Asgard logs it as «voltage drop (brownout)». Do not connect the supply's +5 V to the 5V/VIN pin while USB is connected.
+- **Capacitor.** Put 470 to 1000 µF (10 V or more) on the servo terminals, plus a 100 nF ceramic one. It absorbs the start-up peaks (each 1.8 kg·cm servo draws up to 0.7–1 A when starting or stalling).
+- **Signal resistors.** The 330 Ω one in series damps the cable's ringing. The 10 kΩ one to GND keeps the signal low while the ESP32 boots.
+- **3.3 V level.** SG90 and MG90S servos accept it. If one does not respond well at 6 V, power them at 5 V or use a level shifter (74AHCT125).
+- **Mechanical stops.** Do not leave a servo pushing against its stop: it draws maximum current and heats up. Adjust `pan_min`/`pan_max`/`tilt_min`/`tilt_max` and, if needed, `min_pulse_us`/`max_pulse_us`.
 
-#### Comprobar con el osciloscopio
+#### Checking with the oscilloscope
 
-1. **Pulso.** Mide en la señal de un servo, disparando por flanco de subida, a 0,5 ms/div. Debe verse un pulso de 0,5–2,4 ms cada 20 ms con el flanco de bajada quieto. Si ese flanco «baila» decenas o cientos de µs, sobre todo con la IA activa, el pulso es por software.
-2. **Medición.** Usa el resorte de tierra corto de la sonda, conectado al punto único de tierra. El cable largo con caimán capta ruido que no está en el circuito.
-3. **Alimentación.** Mide en el conector de los servos mientras se mueven. Caídas de más de 0,5 V indican una fuente, unos cables o un capacitor insuficientes.
+1. **Pulse.** Measure on a servo's signal, triggering on the rising edge, at 0.5 ms/div. You should see a 0.5–2.4 ms pulse every 20 ms with a steady falling edge. If that edge «dances» tens or hundreds of µs, especially with the AI running, the pulse is generated in software.
+2. **Measuring.** Use the probe's short ground spring, connected to the single ground point. The long alligator lead picks up noise that is not in the circuit.
+3. **Power.** Measure at the servo connector while they move. Drops of more than 0.5 V point to an insufficient supply, wires or capacitor.
 
-## Instalación
+## Installation
 
-1. **Registra el Asgard en Bifröst** (en el servidor) y copia el secreto que aparece:
+1. **Register the Asgard on Bifröst** (on the server) and copy the secret it shows:
    ```bash
-   bifrost asgard registrar aula-1 --nombre "Aula 1" --ubicacion "Edificio A"
+   bifrost asgard register room-1 --name "Room 1" --location "Building A"
    ```
-2. **En la Raspberry**, como tu usuario normal (sin `sudo`):
+2. **On the Raspberry Pi**, as your normal user (no `sudo`):
    ```bash
-   git clone <repositorio> && cd asgard_proyect/Asgard/Software
-   chmod +x instalar.sh
-   # Red local (Bifröst en modo local):
-   ./instalar.sh --dispositivo aula-1 --secreto <SECRETO> --servidor 192.168.1.20
-   # Internet (Bifröst en modo público con certificado autofirmado):
-   ./instalar.sh --dispositivo aula-1 --secreto <SECRETO> --servidor bifrost.midominio.com --huella <HUELLA>
+   git clone <repository> && cd asgard_proyect/Asgard/Software
+   chmod +x install.sh
+   # Local network (Bifröst in local mode):
+   ./install.sh --device room-1 --secret <SECRET> --server 192.168.1.20
+   # Internet (Bifröst in public mode with a self-signed certificate):
+   ./install.sh --device room-1 --secret <SECRET> --server bifrost.mydomain.com --fingerprint <FINGERPRINT>
    ```
-3. Reinicia la Raspberry para aplicar los permisos de grupo (gpio, i2c, video…). Asgard arrancará solo.
+3. Reboot the Raspberry Pi to apply the group permissions (gpio, i2c, video…). Asgard starts by itself.
 
-El instalador instala los paquetes del sistema y crea `.venv`. El entorno ve los paquetes de apt (`gpiozero`, `lgpio`, `picamera2` y la interfaz **`python3-pyqt6`**, o `python3-pyqt5` en sistemas antiguos) e instala OpenCV, NumPy, Pillow, sounddevice, cryptography y MediaPipe. Si el sistema no tiene PyQt, intenta PySide6 con pip (`requirements-pantalla.txt`); sin ninguno, Asgard funciona sin pantalla. Si el sistema trae numpy 1.x, fija `numpy<2` para no romper picamera2. Después crea `asgard.ini`, descarga los modelos de IA, configura el arranque automático y ejecuta una comprobación final.
+The installer installs the system packages and creates `.venv`. The environment sees the apt packages (`gpiozero`, `lgpio`, `picamera2` and the **`python3-pyqt6`** interface, or `python3-pyqt5` on older systems) and installs OpenCV, NumPy, Pillow, sounddevice, cryptography and MediaPipe. When the system has no PyQt, it tries PySide6 with pip (`requirements-screen.txt`); with neither, Asgard works without a screen. When the system ships numpy 1.x, it pins `numpy<2` (in `.pip-constraints.txt`) so picamera2 does not break. Then it creates `asgard.ini`, downloads the AI models, sets up the automatic start and runs a final check. Its messages are in Spanish when the system is in Spanish.
 
-| Opción | Descripción |
+| Option | Description |
 | --- | --- |
-| `--dispositivo`, `--secreto` | Credenciales del registro en Bifröst. |
-| `--servidor HOST[:PUERTO]` | Dirección de Bifröst, o `auto` para buscarlo en la red local. |
-| `--tls`, `--huella HUELLA` | Conexión cifrada (Bifröst en modo público); `--huella` implica `--tls`. |
-| `--camara 0\|picamera2` | Cámara USB por índice, o CSI. |
-| `--servos gpiozero\|pca9685\|esp32\|sim` | Controlador de los servos (`esp32` instala pyserial y agrega tu usuario al grupo `dialout`). |
-| `--mano servo\|gpio\|sim\|ninguno` | Tipo de actuador de la mano. |
-| `--modelo lite\|full\|heavy` | Modelo de IA. |
-| `--arranque escritorio\|servicio\|ninguno` | Con monitor: ventana a pantalla completa al iniciar sesión (predeterminado con escritorio). Sin monitor: servicio del usuario que arranca con el equipo. |
-| `--simulacion` | Arranca con cámara, IA, servos y mano simulados. |
-| `--pigpio` | Instala pigpio (Raspberry Pi 4 o anterior). |
-| `--cancelacion-eco` | Activa la cancelación de eco de PipeWire (experimental). |
-| `--sin-ia`, `--sin-apt` | Omiten MediaPipe o los paquetes del sistema. |
-| `--quitar-arranque` | Elimina el arranque automático. |
+| `--device`, `--secret` | Credentials from the Bifröst registration. |
+| `--server HOST[:PORT]` | Bifröst's address, or `auto` to look for it on the local network. |
+| `--tls`, `--fingerprint FINGERPRINT` | Encrypted connection (Bifröst in public mode); `--fingerprint` implies `--tls`. |
+| `--camera 0\|picamera2` | USB camera by index, or CSI. |
+| `--servos gpiozero\|pca9685\|esp32\|sim` | Servo driver (`esp32` installs pyserial and adds your user to the `dialout` group). |
+| `--hand servo\|gpio\|sim\|none` | Type of hand actuator. |
+| `--model lite\|full\|heavy` | AI model. |
+| `--start desktop\|service\|none` | With a monitor: full-screen window when the session starts (default with a desktop). Without a monitor: user service that starts with the machine. |
+| `--language auto\|en\|es` | Language of the classroom screen (`[screen] language`) and of the installer's messages. |
+| `--simulation` | Starts with simulated camera, AI, servos and hand. |
+| `--pigpio` | Installs pigpio (Raspberry Pi 4 or older). |
+| `--echo-cancel` | Turns on PipeWire echo cancellation (experimental). |
+| `--no-ai`, `--no-apt` | Skip MediaPipe or the system packages. |
+| `--remove-start` | Removes the automatic start. |
 
-Puedes repetir el instalador cuando quieras para cambiar opciones; conserva el `asgard.ini` existente.
+You can run the installer again whenever you want to change options; it keeps the existing `asgard.ini`.
 
-## Configuración (`asgard.ini`)
+> Asgard 2 uses English names in `asgard.ini` (`[screen]`, `device`, `secret`…). An Asgard 1.x `asgard.ini` is not converted: create it again with the installer or from `asgard.example.ini`.
 
-El archivo está comentado. Se edita a mano, o con `python main.py --configurar seccion.clave=valor`. Contiene el secreto, así que el instalador le pone permisos `600`.
+## Configuration (`asgard.ini`)
 
-| Sección | Claves principales |
+The file is commented (see `asgard.example.ini`). Edit it by hand, or with `python main.py --set section.key=value`. It holds the secret, so the installer gives it `600` permissions.
+
+| Section | Main keys |
 | --- | --- |
-| `[bifrost]` | `servidor` (IP, dominio o `auto`), `puerto`, `tls`, `huella_tls`, `ca_tls`, `dispositivo`, `secreto` |
-| `[video]` | `camara`, `ancho`, `alto`, `fps`, `calidad_jpeg` (máxima calidad que **siempre** se emite), `campo_vision`, `rotacion`, `espejo` |
-| `[audio]` | `entrada`, `salida` (vacío = predeterminado, índice o parte del nombre), `canales`, `colchon_ms`, `transporte` (`auto` o `tcp`), `latencia`, `sonido_mano`, `sonido_chat` |
-| `[servos]` | `controlador`, `pin_pan`, `pin_tilt`, `canal_pan`, `canal_tilt`, límites `pan_min/max` y `tilt_min/max`, `reposo_pan/tilt`, pulsos, `velocidad_max`, `invertir_pan/tilt`, `soltar_en_reposo` |
-| `[mano]` | `tipo`, `controlador`, `pin`, `canal`, `angulo_reposo`, `angulo_levantada`, `bajar_automatico_s`, `activo_alto` |
-| `[ia]` | `activada`, `modelo`, `max_personas`, `confianza_min`, `visibilidad_min`, `ancho_analisis`, `frecuencia_max`, `punto_mira` |
-| `[pantalla]` | `modo` (`completa`, `ventana` o `ninguna`), `tamano_chat`, `diagnostico` |
+| `[bifrost]` | `server` (IP, domain or `auto`), `port`, `tls`, `tls_fingerprint`, `tls_ca`, `tls_insecure`, `device`, `secret` |
+| `[video]` | `camera`, `width`, `height`, `fps`, `jpeg_quality` (the top quality that is **always** streamed), `field_of_view`, `rotation`, `mirror` |
+| `[audio]` | `enabled`, `input`, `output` (empty = default, index or part of the name), `channels`, `jitter_ms`, `transport` (`auto` or `tcp`), `latency`, `hand_sound`, `chat_sound` |
+| `[servos]` | `driver`, `pan_pin`, `tilt_pin`, `pan_channel`, `tilt_channel`, `serial_port`, limits `pan_min/max` and `tilt_min/max`, `rest_pan/tilt`, pulses `min_pulse_us`/`max_pulse_us`, `max_speed`, `invert_pan/tilt`, `release_when_idle` |
+| `[hand]` | `type`, `driver`, `pin`, `channel`, `rest_angle`, `raised_angle`, `auto_lower_s`, `active_high` |
+| `[ai]` | `enabled`, `model`, `max_people`, `min_confidence`, `min_visibility`, `analysis_width`, `max_hz`, `aim_y` |
+| `[screen]` | `mode` (`fullscreen`, `window` or `none`), `chat_font_size`, `diagnostics`, `language` (`auto`, `en` or `es`) |
 
-El audio siempre se emite en máxima calidad: PCM de 16 bits a 48 kHz, en estéreo si el micrófono lo permite. Las posiciones guardadas desde Midgard y los ajustes de seguimiento se guardan en `estado_asgard.json`.
+Yes/no values are written `yes`/`no`. Audio is always streamed in top quality: 16-bit 48 kHz PCM, in stereo when the microphone allows it. Positions saved from Midgard and the tracking settings are kept in `asgard_status.json`.
 
-## Diagnóstico
+## Diagnostics
 
 ```bash
-.venv/bin/python main.py --comprobar        # dependencias, hardware opcional, configuración e IA
-.venv/bin/python main.py --listar-audio     # micrófonos y altavoces (para [audio] entrada/salida)
-.venv/bin/python main.py --listar-camaras   # cámaras USB
-.venv/bin/python main.py --probar-servos    # recorre los límites (verifica la dirección de cada eje)
-.venv/bin/python main.py --probar-mano      # levanta y baja la mano
-.venv/bin/python main.py --ventana          # ejecución manual en una ventana
-.venv/bin/python main.py --descargar-modelos full lite
+.venv/bin/python main.py --check            # dependencies, optional hardware, configuration and AI
+.venv/bin/python main.py --list-audio       # microphones and speakers (for [audio] input/output)
+.venv/bin/python main.py --list-cameras     # USB cameras
+.venv/bin/python main.py --test-servos      # sweeps the limits (checks each axis' direction)
+.venv/bin/python main.py --test-hand        # raises and lowers the hand
+.venv/bin/python main.py --windowed         # manual run in a window
+.venv/bin/python main.py --download-models full lite
 ```
 
-- Registros: `registros/asgard.log`. En modo servicio, también `journalctl --user -u asgard -f`.
-- Sin sesión gráfica (`DISPLAY`/`WAYLAND_DISPLAY`) o sin Qt, Asgard sigue funcionando sin pantalla y lo anota en el registro.
+- Logs: `logs/asgard.log`. In service mode, also `journalctl --user -u asgard -f`.
+- Without a graphical session (`DISPLAY`/`WAYLAND_DISPLAY`) or without Qt, Asgard keeps working without a screen and notes it in the log.
+- Other options: `--config PATH` (another `asgard.ini`), `--server`, `--device`, `--secret` (they override the ones in `asgard.ini` for that run), `--no-screen`, `--no-audio` and `--log-level`.
 
-## Funciones en detalle
+## Features in detail
 
-**Cámara (desde Midgard)**
+**Camera (from Midgard)**
 
-- *Manual*: deslizadores, flechas o teclado. Los servos se mueven con velocidad limitada, sin tirones.
-- *Fijar punto*: Midgard hace clic en un lugar del video y la cámara lo centra y se queda ahí. Las posiciones guardadas (por ejemplo, «pizarrón») permiten volver a un punto con un clic.
-- *Seguir persona elegida*: Midgard hace clic sobre una persona detectada. Asgard le asigna un número que se mantiene entre cuadros y la sigue. Si la pierde, espera y la recupera cuando reaparece cerca de su última posición.
-- *Seguir automáticamente*: sigue a la persona más grande del cuadro, es decir, la más cercana.
+- *Manual*: sliders, arrows or keyboard. The servos move at a limited speed, without jerks.
+- *Aim at a point*: Midgard clicks a spot in the video and the camera centers it and stays there. Saved positions (for example, «whiteboard») go back to a point with one click.
+- *Follow the chosen person* (`follow`): Midgard clicks a detected person. Asgard gives them a number that is kept between frames and follows them. When it loses them, it waits and picks them up again when they reappear near their last position.
+- *Follow automatically* (`auto`): follows the largest person in the frame, that is, the closest one.
 
-**IA**
+**AI**
 
-Usa MediaPipe Pose Landmarker sobre una copia reducida del cuadro (`ancho_analisis`), así que el video sigue saliendo en máxima calidad.
+It uses MediaPipe Pose Landmarker on a reduced copy of the frame (`analysis_width`), so the video still goes out in top quality.
 
-| Modelo | Velocidad aproximada en Pi 5 | Uso |
+| Model | Approximate speed on a Pi 5 | Use |
 | --- | --- | --- |
-| `lite` | La más rápida | Pi 4 o seguimiento fluido |
-| `full` | Media | Equilibrio (predeterminado) |
-| `heavy` | La más lenta | Máxima precisión |
+| `lite` | The fastest | Pi 4 or smooth tracking |
+| `full` | Medium | Balance (default) |
+| `heavy` | The slowest | Top accuracy |
 
-Si MediaPipe no está disponible, Asgard funciona igual, solo con control manual, y Midgard lo indica.
+When MediaPipe is not available, Asgard works anyway, with manual control only, and Midgard says so. The models are kept in `models/`.
 
-Cuando Midgard está en su **vista de desarrollador**, Asgard agrega a las detecciones los puntos del cuerpo (esqueleto) y el punto de mira, y a su estado los datos de los servos (posición objetivo, en movimiento, con pulsos o sueltos, velocidad). Desde esa vista también se ajustan la zona muerta y el punto de mira, que se guardan en `estado_asgard.json`.
+When Midgard is in its **developer view**, Asgard adds the body points (skeleton) and the aim point to the detections, and the servo data (target position, moving, holding or released, speed) to its state. From that view the dead zone and the aim point are also adjusted, and they are saved in `asgard_status.json`.
 
-**Mano**
+**Hand**
 
-Se levanta y se baja desde Midgard. Suena un aviso y la tarjeta «Mano levantada» se ilumina en la pantalla del aula. Con `bajar_automatico_s` se baja sola pasado ese tiempo.
+It is raised and lowered from Midgard. A tone sounds and the «Hand raised» card lights up on the classroom screen. With `auto_lower_s` it lowers by itself after that time.
 
-**Red**
+**Network**
 
-- Reconexión automática con espera creciente; si Bifröst está en modo local puede usarse `servidor = auto`.
-- Si la red se corta durante una sesión, la sesión se reanuda sola al volver.
-- El audio usa UDP cifrado y cambia solo a TCP si UDP está bloqueado. Con `transporte = tcp` se fuerza TCP.
+- Automatic reconnection with growing waits; when Bifröst is in local mode `server = auto` can be used.
+- When the network drops during a session, the session resumes by itself when it comes back.
+- Audio uses encrypted UDP and switches to TCP by itself when UDP is blocked. `transport = tcp` forces TCP.
+- The notices Asgard sends to Midgard travel as English templates; Midgard shows them in its user's language.
 
-**Eco**
+**Echo**
 
-Si el altavoz del aula reproduce la voz de Midgard, el micrófono la vuelve a captar. Usa un altavoz-micrófono con cancelación de eco, o prueba `--cancelacion-eco`, que crea en PipeWire un «Asgard micrófono sin eco» y un «Asgard altavoz sin eco». Si no quedan como dispositivos predeterminados, elígelos con `wpctl status` y `wpctl set-default <ID>`.
+When the classroom speaker plays Midgard's voice, the microphone picks it up again. Use a speakerphone with echo cancellation, or try `--echo-cancel`, which creates in PipeWire (`system/60-asgard-echo-cancel.conf`) an echo-free Asgard microphone and speaker. When they do not become the default devices, choose them with `wpctl status` and `wpctl set-default <ID>`.
 
-## Simulación (sin hardware)
+## Simulation (no hardware)
 
-Funciona en cualquier PC (Windows, Linux o macOS) con el entorno de la raíz, que prepara `instalar_entorno.bat` (o `.sh`) una sola vez. Desde la raíz del repositorio:
+It works on any PC (Windows, Linux or macOS) with the root environment, prepared once by `setup_env.bat` (or `.sh`). From the repository root:
 
 ```bash
-.venv\Scripts\python Asgard\Software\main.py --simulacion --ventana --sin-audio   # Linux/macOS: .venv/bin/python
+.venv\Scripts\python Asgard\Software\main.py --simulation --windowed --no-audio   # Linux/macOS: .venv/bin/python
 ```
 
-La simulación usa una cámara virtual con dos personas que caminan y responde al ángulo de los servos simulados: al seguir a alguien, la persona queda centrada. Sigue necesitando un Bifröst y un Asgard registrado.
+The simulation uses a virtual camera with two people walking and responds to the simulated servos' angle: when following someone, the person stays centered. It still needs a Bifröst and a registered Asgard.
 
-## Problemas comunes
+## Common problems
 
-| Síntoma | Causa probable y solución |
+| Symptom | Likely cause and solution |
 | --- | --- |
-| La pantalla dice «Sin conexión con Bifröst: Identificador o secreto inválido» | Revisa `dispositivo` y `secreto`, o genera otro con `bifrost asgard secreto <id>`. |
-| «El certificado TLS del servidor no es de confianza» | Copia en `huella_tls` la huella que muestra `bifrost huella`. |
-| Un eje se mueve al revés | `invertir_pan = si` o `invertir_tilt = si` (o desde Midgard, en Seguimiento). |
-| Los servos tiemblan o se mueven solos | Si `--probar-servos` dice «PWM por software», usa un ESP32 (`controlador = esp32`) o un PCA9685. Revisa el cableado y la tierra en [Conexión con ESP32](#conexión-con-esp32-recomendada); `soltar_en_reposo = si`. |
-| «El ESP32 de los servos se reinició: caída de voltaje» | El ESP32 se queda sin voltaje cuando arrancan los motores. Aliméntalo por el USB de la Raspberry, agrega el capacitor y usa una fuente de al menos 1 A por servo. |
-| «No se encontró ningún ESP32 por USB» o «Permission denied: /dev/ttyUSB0» | Usa un cable de datos. Ejecuta `./instalar.sh --servos esp32` y reinicia (grupo `dialout`). Si hay varios puertos, fija `[servos] puerto_serie`. |
-| «El ESP32 … no respondió» o «firmware incompatible» | Carga `Asgard/Firmware/asgard_servos` en el ESP32 (ver su README). |
-| «IA no disponible» | Sistema de 32 bits o sin wheel de MediaPipe para esta versión de Python: usa Raspberry Pi OS de 64 bits. |
-| No hay audio | Usa `--listar-audio` y pon el dispositivo en `[audio] entrada/salida`. Si se entrecorta, prueba `latencia = high`. |
-| La cámara CSI falla con un error de numpy | Reinstala con `./instalar.sh` para que fije `numpy<2` en el entorno. |
-| «No está instalada la biblioteca Qt» y no aparece la pantalla | `sudo apt install python3-pyqt6` (o `python3-pyqt5`) y vuelve a ejecutar `./instalar.sh`. |
-| «Versión de protocolo incompatible» | Actualiza Asgard, Midgard y Bifröst a la misma versión. |
+| The screen says «Not connected to Bifröst» and the log «Invalid Asgard identifier or secret» | Check `device` and `secret`, or generate a new one with `bifrost asgard secret <id>`. |
+| «The server's TLS certificate is not trusted» | Copy into `tls_fingerprint` the fingerprint `bifrost fingerprint` shows. |
+| An axis moves the wrong way | `invert_pan = yes` or `invert_tilt = yes` (or from Midgard, under Tracking). |
+| The servos jitter or move by themselves | When `--test-servos` says «software PWM», use an ESP32 (`driver = esp32`) or a PCA9685. Check the wiring and the ground in [ESP32 wiring](#esp32-wiring-recommended); `release_when_idle = yes`. |
+| «The servo ESP32 restarted: voltage drop (brownout)…» | The ESP32 runs out of voltage when the motors start. Power it from the Raspberry Pi's USB, add the capacitor and use a supply of at least 1 A per servo. |
+| «No ESP32 was found over USB» or «Permission denied: /dev/ttyUSB0» | Use a data cable. Run `./install.sh --servos esp32` and reboot (`dialout` group). With several ports, set `[servos] serial_port`. |
+| «The ESP32 … did not answer» or «incompatible firmware» | Flash `Asgard/Firmware/asgard_servos` to the ESP32 (see its README). Asgard 2 uses firmware protocol 2. |
+| «AI not available» | 32-bit system or no MediaPipe wheel for this Python version: use 64-bit Raspberry Pi OS. |
+| No audio | Use `--list-audio` and put the device in `[audio] input/output`. When it is choppy, try `latency = high`. |
+| The CSI camera fails with a numpy error | Reinstall with `./install.sh` so it pins `numpy<2` in the environment. |
+| «The Qt library is not installed» and the screen does not appear | `sudo apt install python3-pyqt6` (or `python3-pyqt5`) and run `./install.sh` again. |
+| «Incompatible protocol version» | Update Asgard, Midgard and Bifröst to the same version. |
 
-## Desarrollo
+## Development
 
-Los módulos compartidos (`protocolo.py`, `red_cliente.py`, `audio.py`, `imagen.py`, `qt.py`, `tema.py`, `iconos.py`, `componentes.py` y la carpeta `fuentes/`) son copias de `Comun/`: edítalos allí y ejecuta `python Comun/sincronizar.py`. La pantalla del aula está en `asgard/pantalla_aula.py`; `asgard/pantalla.py` define la versión sin monitor.
+The shared modules (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, the `fonts/` folder and `locale/common.es.json`) are copies from `Common/`: edit them there and run `python Common/sync.py`. The classroom screen is in `asgard/classroom_screen.py`; `asgard/screen.py` defines the version without a monitor. The other modules: `app.py` (the application), `config.py` (`asgard.ini`), `camera.py`, `tracking.py` (AI and tracking), `servos.py`, `esp32.py`, `hand.py` and `simulation.py`. Asgard's Spanish texts are in `asgard/locale/asgard.es.json`.

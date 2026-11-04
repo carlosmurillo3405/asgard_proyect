@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
-"""Midgard: cliente de usuario multiplataforma del sistema Asgard."""
+"""Midgard: cross-platform user client of the Asgard system."""
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"

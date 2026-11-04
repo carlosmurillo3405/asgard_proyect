@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Configuración de Asgard: lectura y edición de ``asgard.ini``.
+"""Asgard configuration: reading and editing ``asgard.ini``.
 
-El archivo usa claves en español con comentarios. :func:`set_values` cambia
-valores sin borrar los comentarios (lo usa el instalador).
+The file uses commented keys. :func:`set_values` changes values without
+removing the comments (the installer uses it).
 """
 
 from __future__ import annotations
@@ -13,13 +13,15 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from .i18n import tr
+
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = PROGRAM_DIR / "asgard.ini"
-EXAMPLE_CONFIG = PROGRAM_DIR / "asgard.ini.ejemplo"
+EXAMPLE_CONFIG = PROGRAM_DIR / "asgard.example.ini"
 
 
 class ConfigError(ValueError):
-    """La configuración no se puede usar."""
+    """The configuration cannot be used."""
 
 
 @dataclass
@@ -82,7 +84,7 @@ class ServoConfig:
 
 
 @dataclass
-class ActuatorConfig:
+class HandConfig:
     kind: str = "servo"
     driver: str = ""
     pin: int = 22
@@ -107,9 +109,10 @@ class AiConfig:
 
 @dataclass
 class ScreenConfig:
-    mode: str = "completa"
+    mode: str = "fullscreen"
     chat_font_size: int = 20
     diagnostics: bool = False
+    language: str = "auto"
 
 
 @dataclass
@@ -119,63 +122,57 @@ class AsgardConfig:
     video: VideoConfig = field(default_factory=VideoConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     servos: ServoConfig = field(default_factory=ServoConfig)
-    actuator: ActuatorConfig = field(default_factory=ActuatorConfig)
+    hand: HandConfig = field(default_factory=HandConfig)
     ai: AiConfig = field(default_factory=AiConfig)
     screen: ScreenConfig = field(default_factory=ScreenConfig)
     warnings: list[str] = field(default_factory=list)
 
     @property
     def state_path(self) -> Path:
-        return self.path.with_name("estado_asgard.json")
+        return self.path.with_name("asgard_status.json")
 
     @property
     def models_dir(self) -> Path:
-        return PROGRAM_DIR / "modelos"
+        return PROGRAM_DIR / "models"
 
     @property
     def log_path(self) -> Path:
-        return PROGRAM_DIR / "registros" / "asgard.log"
+        return PROGRAM_DIR / "logs" / "asgard.log"
 
 
-# Sección del .ini -> (atributo, {clave en español: campo}).
+def _same(*names: str) -> dict[str, str]:
+    return {name: name for name in names}
+
+
+# Sección del .ini -> (atributo, {clave del .ini: campo}).
 SECTIONS: dict[str, tuple[str, dict[str, str]]] = {
     "bifrost": ("bifrost", {
-        "servidor": "server", "puerto": "port", "tls": "tls", "huella_tls": "fingerprint",
-        "ca_tls": "cafile", "tls_inseguro": "insecure", "dispositivo": "device", "secreto": "secret",
+        **_same("server", "port", "tls", "device", "secret"),
+        "tls_fingerprint": "fingerprint", "tls_ca": "cafile", "tls_insecure": "insecure",
     }),
     "video": ("video", {
-        "camara": "camera", "ancho": "width", "alto": "height", "fps": "fps",
-        "calidad_jpeg": "jpeg_quality", "campo_vision": "hfov", "rotacion": "rotation", "espejo": "mirror",
+        **_same("camera", "width", "height", "fps", "jpeg_quality", "rotation", "mirror"),
+        "field_of_view": "hfov",
     }),
-    "audio": ("audio", {
-        "activado": "enabled", "entrada": "input", "salida": "output", "canales": "channels",
-        "colchon_ms": "jitter_ms", "transporte": "transport", "latencia": "latency",
-        "sonido_mano": "hand_sound", "sonido_chat": "chat_sound",
-    }),
+    "audio": ("audio", _same("enabled", "input", "output", "channels", "jitter_ms", "transport", "latency",
+                             "hand_sound", "chat_sound")),
     "servos": ("servos", {
-        "controlador": "driver", "pin_pan": "pan_pin", "pin_tilt": "tilt_pin",
-        "canal_pan": "pan_channel", "canal_tilt": "tilt_channel", "puerto_serie": "serial_port",
-        "pan_min": "pan_min",
-        "pan_max": "pan_max", "tilt_min": "tilt_min", "tilt_max": "tilt_max",
-        "reposo_pan": "rest_pan", "reposo_tilt": "rest_tilt", "pulso_min_us": "min_pulse_us",
-        "pulso_max_us": "max_pulse_us", "velocidad_max": "speed", "invertir_pan": "invert_pan",
-        "invertir_tilt": "invert_tilt", "soltar_en_reposo": "release_when_idle",
+        **_same("driver", "pan_pin", "tilt_pin", "pan_channel", "tilt_channel", "serial_port", "pan_min",
+                "pan_max", "tilt_min", "tilt_max", "rest_pan", "rest_tilt", "min_pulse_us", "max_pulse_us",
+                "invert_pan", "invert_tilt", "release_when_idle"),
+        "max_speed": "speed",
     }),
-    "mano": ("actuator", {
-        "tipo": "kind", "controlador": "driver", "pin": "pin", "canal": "channel",
-        "angulo_reposo": "rest_angle", "angulo_levantada": "raised_angle",
-        "bajar_automatico_s": "auto_lower_s", "activo_alto": "active_high",
+    "hand": ("hand", {
+        **_same("driver", "pin", "channel", "rest_angle", "raised_angle", "auto_lower_s", "active_high"),
+        "type": "kind",
     }),
-    "ia": ("ai", {
-        "activada": "enabled", "modelo": "model", "max_personas": "max_people",
-        "confianza_min": "min_confidence", "visibilidad_min": "min_visibility",
-        "ancho_analisis": "analysis_width", "frecuencia_max": "max_hz", "punto_mira": "aim_y",
-    }),
-    "pantalla": ("screen", {"modo": "mode", "tamano_chat": "chat_font_size", "diagnostico": "diagnostics"}),
+    "ai": ("ai", _same("enabled", "model", "max_people", "min_confidence", "min_visibility", "analysis_width",
+                       "max_hz", "aim_y")),
+    "screen": ("screen", _same("mode", "chat_font_size", "diagnostics", "language")),
 }
 
-_TRUE = {"si", "sí", "s", "yes", "y", "true", "1", "on", "verdadero"}
-_FALSE = {"no", "n", "false", "0", "off", "falso"}
+_TRUE = {"yes", "y", "true", "1", "on", "si", "sí", "s"}
+_FALSE = {"no", "n", "false", "0", "off"}
 
 
 def parse_bool(text: str) -> bool:
@@ -184,7 +181,7 @@ def parse_bool(text: str) -> bool:
         return True
     if value in _FALSE:
         return False
-    raise ValueError(f"'{text}' no es sí/no")
+    raise ValueError(tr("'{text}' is not yes/no", text=text))
 
 
 def _convert(kind: str, text: str) -> Any:
@@ -200,18 +197,18 @@ def _convert(kind: str, text: str) -> Any:
 def load_config(path: str | Path | None = None) -> AsgardConfig:
     config_path = Path(path) if path else DEFAULT_CONFIG
     if not config_path.exists():
-        raise ConfigError(
-            f"No existe {config_path}. Ejecuta instalar.sh o copia asgard.ini.ejemplo como asgard.ini."
-        )
+        raise ConfigError(tr(
+            "{path} does not exist. Run install.sh or copy asgard.example.ini as asgard.ini.", path=config_path
+        ))
     parser = configparser.ConfigParser(inline_comment_prefixes=(";", "#"), interpolation=None)
     try:
         parser.read(config_path, encoding="utf-8")
     except configparser.Error as error:
-        raise ConfigError(f"No se pudo leer {config_path}: {error}") from error
+        raise ConfigError(tr("{path} could not be read: {error}", path=config_path, error=error)) from error
     config = AsgardConfig(path=config_path)
     for section in parser.sections():
         if section not in SECTIONS:
-            config.warnings.append(f"Sección desconocida [{section}] ignorada.")
+            config.warnings.append(tr("Unknown section [{section}] ignored.", section=section))
             continue
         attribute, keys = SECTIONS[section]
         target = getattr(config, attribute)
@@ -219,7 +216,7 @@ def load_config(path: str | Path | None = None) -> AsgardConfig:
         for key, raw in parser.items(section):
             name = keys.get(key)
             if name is None:
-                config.warnings.append(f"Clave desconocida '{key}' en [{section}] ignorada.")
+                config.warnings.append(tr("Unknown key '{key}' in [{section}] ignored.", key=key, section=section))
                 continue
             try:
                 setattr(target, name, _convert(str(types[name]), raw))
@@ -235,35 +232,36 @@ def validate(config: AsgardConfig) -> None:
             raise ConfigError(message)
 
     b = config.bifrost
-    require(1 <= b.port <= 65535, "[bifrost] puerto debe estar entre 1 y 65535.")
+    require(1 <= b.port <= 65535, tr("[bifrost] port must be between 1 and 65535."))
     v = config.video
-    require(1 <= v.jpeg_quality <= 100, "[video] calidad_jpeg debe estar entre 1 y 100.")
-    require(v.rotation in (0, 90, 180, 270), "[video] rotacion debe ser 0, 90, 180 o 270.")
-    require(v.width >= 160 and v.height >= 120 and 1 <= v.fps <= 60, "[video] ancho/alto/fps fuera de rango.")
-    require(10.0 <= v.hfov <= 170.0, "[video] campo_vision debe estar entre 10 y 170 grados.")
+    require(1 <= v.jpeg_quality <= 100, tr("[video] jpeg_quality must be between 1 and 100."))
+    require(v.rotation in (0, 90, 180, 270), tr("[video] rotation must be 0, 90, 180 or 270."))
+    require(v.width >= 160 and v.height >= 120 and 1 <= v.fps <= 60, tr("[video] width/height/fps out of range."))
+    require(10.0 <= v.hfov <= 170.0, tr("[video] field_of_view must be between 10 and 170 degrees."))
     a = config.audio
-    require(a.channels in (1, 2), "[audio] canales debe ser 1 o 2.")
-    require(a.transport in ("auto", "tcp"), "[audio] transporte debe ser auto o tcp.")
-    require(a.latency in ("low", "high"), "[audio] latencia debe ser low o high.")
+    require(a.channels in (1, 2), tr("[audio] channels must be 1 or 2."))
+    require(a.transport in ("auto", "tcp"), tr("[audio] transport must be auto or tcp."))
+    require(a.latency in ("low", "high"), tr("[audio] latency must be low or high."))
     s = config.servos
-    require(s.driver in ("gpiozero", "pca9685", "esp32", "sim"), "[servos] controlador: gpiozero, pca9685, esp32 o sim.")
+    require(s.driver in ("gpiozero", "pca9685", "esp32", "sim"), tr("[servos] driver: gpiozero, pca9685, esp32 or sim."))
     require(0 <= s.pan_channel <= 15 and 0 <= s.tilt_channel <= 15 and s.pan_channel != s.tilt_channel,
-            "[servos] canal_pan y canal_tilt deben ser distintos y estar entre 0 y 15.")
-    require(bool(s.serial_port), "[servos] puerto_serie: 'auto' o el puerto del ESP32 (por ejemplo /dev/ttyUSB0).")
-    require(0 <= s.pan_min < s.pan_max <= 180, "[servos] pan_min/pan_max inválidos.")
-    require(0 <= s.tilt_min < s.tilt_max <= 180, "[servos] tilt_min/tilt_max inválidos.")
-    require(5 <= s.speed <= 400, "[servos] velocidad_max debe estar entre 5 y 400 °/s.")
-    m = config.actuator
-    require(m.kind in ("servo", "gpio", "sim", "ninguno"), "[mano] tipo: servo, gpio, sim o ninguno.")
-    require(m.driver in ("", "gpiozero", "pca9685", "esp32", "sim"),
-            "[mano] controlador: gpiozero, pca9685, esp32, sim o vacío.")
-    require(m.auto_lower_s >= 0, "[mano] bajar_automatico_s no puede ser negativo.")
+            tr("[servos] pan_channel and tilt_channel must be different and between 0 and 15."))
+    require(bool(s.serial_port), tr("[servos] serial_port: 'auto' or the ESP32's port (for example /dev/ttyUSB0)."))
+    require(0 <= s.pan_min < s.pan_max <= 180, tr("[servos] invalid pan_min/pan_max."))
+    require(0 <= s.tilt_min < s.tilt_max <= 180, tr("[servos] invalid tilt_min/tilt_max."))
+    require(5 <= s.speed <= 400, tr("[servos] max_speed must be between 5 and 400 °/s."))
+    h = config.hand
+    require(h.kind in ("servo", "gpio", "sim", "none"), tr("[hand] type: servo, gpio, sim or none."))
+    require(h.driver in ("", "gpiozero", "pca9685", "esp32", "sim"),
+            tr("[hand] driver: gpiozero, pca9685, esp32, sim or empty."))
+    require(h.auto_lower_s >= 0, tr("[hand] auto_lower_s cannot be negative."))
     i = config.ai
-    require(1 <= i.max_people <= 10, "[ia] max_personas debe estar entre 1 y 10.")
-    require(0 <= i.min_confidence <= 1 and 0 <= i.min_visibility <= 1, "[ia] confianza/visibilidad entre 0 y 1.")
-    require(160 <= i.analysis_width <= 1920, "[ia] ancho_analisis debe estar entre 160 y 1920.")
-    require(0 <= i.aim_y <= 1, "[ia] punto_mira debe estar entre 0 y 1.")
-    require(config.screen.mode in ("completa", "ventana", "ninguna"), "[pantalla] modo: completa, ventana o ninguna.")
+    require(1 <= i.max_people <= 10, tr("[ai] max_people must be between 1 and 10."))
+    require(0 <= i.min_confidence <= 1 and 0 <= i.min_visibility <= 1, tr("[ai] confidence/visibility between 0 and 1."))
+    require(160 <= i.analysis_width <= 1920, tr("[ai] analysis_width must be between 160 and 1920."))
+    require(0 <= i.aim_y <= 1, tr("[ai] aim_y must be between 0 and 1."))
+    require(config.screen.mode in ("fullscreen", "window", "none"), tr("[screen] mode: fullscreen, window or none."))
+    require(config.screen.language in ("auto", "en", "es"), tr("[screen] language: auto, en or es."))
 
 
 def missing_credentials(config: AsgardConfig) -> bool:
@@ -271,9 +269,9 @@ def missing_credentials(config: AsgardConfig) -> bool:
 
 
 def set_values(path: str | Path, updates: dict[str, dict[str, str]]) -> None:
-    """Cambia valores de ``asgard.ini`` conservando comentarios y orden.
+    """Changes values in ``asgard.ini`` keeping comments and order.
 
-    ``updates`` = {"bifrost": {"servidor": "192.168.1.20", ...}, ...}.
+    ``updates`` = {"bifrost": {"server": "192.168.1.20", ...}, ...}.
     """
     config_path = Path(path)
     lines = config_path.read_text(encoding="utf-8").splitlines()
