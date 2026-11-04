@@ -4,7 +4,7 @@
 Tipos (sección ``[mano]`` de ``asgard.ini``):
 
 * ``servo``: un servo mueve el brazo entre ``angulo_reposo`` y
-  ``angulo_levantada`` (GPIO con gpiozero o canal de PCA9685).
+  ``angulo_levantada`` (GPIO con gpiozero, canal de PCA9685 o canal del ESP32).
 * ``gpio``: una salida digital activa un relé, solenoide o LED.
 * ``sim``: simulación (solo registra el cambio).
 * ``ninguno``: Asgard no tiene mano.
@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any
 
-from .servos import clamp, get_pin_factory, get_servokit
+from .servos import clamp, get_pin_factory, get_servokit, pulse_us
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +103,36 @@ class PcaServoHand(_ServoHandBase):
         self.kit.servo[self.channel].angle = angle
 
 
+class Esp32ServoHand(_ServoHandBase):
+    def __init__(self, port: str, channel: int, rest_angle: float, raised_angle: float,
+                 min_pulse_us: int, max_pulse_us: int) -> None:
+        super().__init__(rest_angle, raised_angle)
+        from .esp32 import acquire_link, release_link
+
+        self.link = acquire_link(port)
+        try:
+            self.link.check_channels((channel,))
+        except Exception:
+            release_link(self.link)
+            raise
+        self.channel = channel
+        self.pulse_range = (min_pulse_us, max_pulse_us)
+        self.name = f"servo ESP32 {self.link.port} canal {channel}"
+        self._closed = False
+
+    def _write(self, angle: float | None) -> None:
+        self.link.set_pulses({self.channel: 0 if angle is None else pulse_us(angle, *self.pulse_range)})
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        from .esp32 import release_link
+
+        super().close()
+        release_link(self.link)
+
+
 class GpioOutputHand:
     simulated = False
 
@@ -134,6 +164,9 @@ def make_hand_backend(config: Any, servo_config: Any, simulate: bool = False) ->
     try:
         if config.kind == "gpio":
             return GpioOutputHand(config.pin, config.active_high)
+        if driver == "esp32":
+            return Esp32ServoHand(servo_config.serial_port, config.channel, config.rest_angle, config.raised_angle,
+                                  servo_config.min_pulse_us, servo_config.max_pulse_us)
         if driver == "pca9685":
             return PcaServoHand(config.channel, config.rest_angle, config.raised_angle,
                                 servo_config.min_pulse_us, servo_config.max_pulse_us)

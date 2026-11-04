@@ -3,7 +3,7 @@
 
 ARCHIVO COMPARTIDO: la versión original está en ``Comun/protocolo.py`` y se
 copia a cada programa con ``python Comun/sincronizar.py``. Edita solo la
-original; las pruebas verifican que todas las copias sean idénticas.
+original; ``python Comun/sincronizar.py --comprobar`` verifica que las copias sean idénticas.
 
 Canales
 -------
@@ -17,7 +17,7 @@ Canales
 * **Descubrimiento (UDP)**: en modo local los clientes encuentran a Bifröst
   con una consulta de difusión.
 
-Formato de paquete TCP (heredado de las pruebas de video y pantalla)::
+Formato de paquete TCP::
 
     [longitud del cuerpo: uint32][tipo: 1 byte][longitud JSON: uint32][JSON][datos]
 """
@@ -189,7 +189,7 @@ def _receive_exact(connection: socket.socket, size: int) -> bytes:
 
 
 def recv_packet(connection: socket.socket, max_size: int = MAX_PACKET_SIZE) -> Packet:
-    """Versión bloqueante de :func:`read_packet` (herramientas y pruebas)."""
+    """Versión bloqueante de :func:`read_packet` (herramientas)."""
     header = _receive_exact(connection, _PACKET_LENGTH.size)
     (body_size,) = _PACKET_LENGTH.unpack(header)
     if body_size < _BODY_PREFIX or body_size > max_size:

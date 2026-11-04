@@ -43,7 +43,7 @@ Opciones:
   --tls                     conexión cifrada (Bifröst en modo público)
   --huella HUELLA           huella SHA-256 del certificado de Bifröst (bifrost huella)
   --camara N|picamera2      cámara USB (índice) o CSI
-  --servos gpiozero|pca9685|sim
+  --servos gpiozero|pca9685|esp32|sim
   --mano servo|gpio|sim|ninguno
   --modelo lite|full|heavy  modelo de IA (full por defecto; lite es más rápido)
   --arranque escritorio|servicio|ninguno
@@ -138,7 +138,7 @@ if [ "$APT" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -qq
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${paquetes[@]}"
     grupos=()
-    for grupo in video audio gpio i2c spi render; do
+    for grupo in video audio gpio i2c spi render dialout; do
         if getent group "$grupo" >/dev/null 2>&1; then
             grupos+=("$grupo")
         fi
@@ -178,6 +178,10 @@ info "Instalando dependencias de Python"
 if [ "$SERVOS" = "pca9685" ] || grep -Eq '^[[:space:]]*controlador[[:space:]]*=[[:space:]]*pca9685' "$CONFIG" 2>/dev/null; then
     info "Instalando soporte para PCA9685"
     "$PY" -m pip install --quiet -c "$RESTRICCIONES" -r "$DIR/requirements-pca9685.txt"
+fi
+if [ "$SERVOS" = "esp32" ] || grep -Eq '^[[:space:]]*controlador[[:space:]]*=[[:space:]]*esp32' "$CONFIG" 2>/dev/null; then
+    info "Instalando soporte para el ESP32 (pyserial)"
+    "$PY" -m pip install --quiet -c "$RESTRICCIONES" -r "$DIR/requirements-esp32.txt"
 fi
 IA_OK=0
 if [ "$IA" -eq 1 ]; then
@@ -311,4 +315,4 @@ echo "  Diagnóstico:   $PY $DIR/main.py --listar-audio | --listar-camaras | --p
 if [ "$ARRANQUE" = "servicio" ]; then
     echo "  Registros:     journalctl --user -u asgard -f"
 fi
-echo "  Si se agregaron grupos (gpio, i2c, video...), reinicia la Raspberry Pi para aplicarlos."
+echo "  Si se agregaron grupos (gpio, i2c, dialout, video...), reinicia la Raspberry Pi para aplicarlos."

@@ -1,1 +1,0 @@
-Carpeta de modelado 3d

@@ -4,8 +4,7 @@
 ARCHIVO COMPARTIDO: la versión original está en ``Comun/audio.py``; se copia
 a cada programa con ``python Comun/sincronizar.py``.
 
-Basado en la prueba de audio (PCM de 16 bits, 48 kHz, bloques de 5 ms y
-jitter buffer). Agrega:
+PCM de 16 bits a 48 kHz en bloques de 5 ms, con jitter buffer. Además:
 
 * cifrado y autenticación por datagrama (ChaCha20-Poly1305);
 * respaldo automático por TCP cuando la red bloquea UDP;
@@ -275,7 +274,7 @@ class AudioEngine:
     El micrófono se envía por UDP cifrado mientras el servidor confirme los
     sondeos; si no hay confirmaciones (UDP bloqueado), por el canal TCP de
     control (``link.send_audio``). Recibe audio por cualquiera de las dos vías.
-    Con ``use_devices=False`` no abre dispositivos (pruebas y equipos sin audio).
+    Con ``use_devices=False`` no abre dispositivos (simulación y equipos sin audio).
     """
 
     def __init__(
@@ -473,7 +472,7 @@ class AudioEngine:
         return "UDP" if self._use_udp() else "TCP"
 
     def send_block(self, pcm: bytes, channels: int) -> None:
-        """Envía un bloque PCM (también lo usan las pruebas)."""
+        """Envía un bloque PCM."""
         if not self._running.is_set() or self._cipher is None:
             return
         if self._use_udp():

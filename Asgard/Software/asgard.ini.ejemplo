@@ -38,11 +38,12 @@ sonido_mano = si             ; tono al levantar la mano
 sonido_chat = si             ; tono al recibir un mensaje
 
 [servos]
-controlador = gpiozero       ; gpiozero (GPIO directo), pca9685 (I2C) o sim
+controlador = gpiozero       ; gpiozero (GPIO directo), pca9685 (I2C), esp32 (USB) o sim
 pin_pan = 17                 ; GPIO del servo horizontal (gpiozero)
 pin_tilt = 27                ; GPIO del servo vertical (gpiozero)
-canal_pan = 0                ; canal PCA9685 del pan
-canal_tilt = 1               ; canal PCA9685 del tilt
+canal_pan = 0                ; canal del pan (PCA9685 o ESP32)
+canal_tilt = 1               ; canal del tilt (PCA9685 o ESP32)
+puerto_serie = auto          ; ESP32: auto o el puerto (/dev/ttyUSB0, /dev/ttyACM0)
 pan_min = 10
 pan_max = 170
 tilt_min = 40
@@ -58,9 +59,9 @@ soltar_en_reposo = si        ; deja de enviar pulsos en reposo (evita temblor)
 
 [mano]
 tipo = servo                 ; servo, gpio (relé/solenoide), sim o ninguno
-controlador =                ; vacío = el mismo de [servos]; gpiozero, pca9685 o sim
+controlador =                ; vacío = el mismo de [servos]; gpiozero, pca9685, esp32 o sim
 pin = 22                     ; GPIO del servo o de la salida digital
-canal = 2                    ; canal PCA9685 (si el controlador es pca9685)
+canal = 2                    ; canal del PCA9685 o del ESP32
 angulo_reposo = 0
 angulo_levantada = 150
 bajar_automatico_s = 0       ; 0 = queda levantada hasta que Midgard la baje

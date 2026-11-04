@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Servomotores Pan/Tilt de la cámara de Asgard.
 
-Basado en la prueba ``seguidor_corporal_pantilt.py``: controladores gpiozero
-(GPIO directo, con pigpio si está disponible) o PCA9685 por I2C, y un hilo que
-mueve los servos hacia el objetivo con velocidad limitada para evitar tirones.
+Controladores gpiozero (GPIO directo, con pigpio si está disponible), PCA9685
+por I2C o un ESP32 por USB (``esp32.py``), y un hilo que mueve los servos hacia
+el objetivo con velocidad limitada para evitar tirones.
 
 Convención: pan sube = la cámara gira a la derecha; tilt sube = la cámara mira
 hacia arriba. Si el montaje es al revés, usa ``invertir_pan``/``invertir_tilt``.
@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+def pulse_us(angle: float, min_pulse_us: int, max_pulse_us: int) -> int:
+    """Ancho de pulso (µs) para un ángulo de 0 a 180°."""
+    return round(min_pulse_us + (max_pulse_us - min_pulse_us) * clamp(angle, 0, 180) / 180)
 
 
 class SimBackend:
@@ -95,6 +100,10 @@ class GpioZeroBackend:
         )
         self.pan = AngularServo(pan_pin, initial_angle=initial[0], **options)
         self.tilt = AngularServo(tilt_pin, initial_angle=initial[1], **options)
+        if kind != "pigpio":
+            log.warning("Los servos usan PWM por software (%s): el pulso varía cuando la CPU está ocupada y los "
+                        "servos tiemblan o se mueven solos. Usa un ESP32 (controlador = esp32), un PCA9685 "
+                        "o pigpio en Raspberry Pi 4.", self.name)
 
     def write(self, pan: float, tilt: float) -> None:
         self.pan.angle = clamp(pan, 0, 180)
@@ -132,6 +141,47 @@ class PCA9685Backend:
         self.detach()
 
 
+class Esp32Backend:
+    """Pan y tilt en dos canales del ESP32 (firmware asgard_servos)."""
+
+    simulated = False
+
+    def __init__(self, port: str, pan_channel: int, tilt_channel: int, min_pulse_us: int, max_pulse_us: int) -> None:
+        from .esp32 import acquire_link, release_link
+
+        self.link = acquire_link(port)
+        try:
+            self.link.check_channels((pan_channel, tilt_channel))
+        except Exception:
+            release_link(self.link)
+            raise
+        self.channels = (pan_channel, tilt_channel)
+        self.pulse_range = (min_pulse_us, max_pulse_us)
+        self._closed = False
+
+    @property
+    def name(self) -> str:
+        return f"{self.link.name} canales {self.channels[0]}/{self.channels[1]}"
+
+    def write(self, pan: float, tilt: float) -> None:
+        self.link.set_pulses({
+            self.channels[0]: pulse_us(pan, *self.pulse_range),
+            self.channels[1]: pulse_us(tilt, *self.pulse_range),
+        })
+
+    def detach(self) -> None:
+        self.link.set_pulses({channel: 0 for channel in self.channels})
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        from .esp32 import release_link
+
+        self.detach()
+        release_link(self.link)
+
+
 def make_servo_backend(config: Any, simulate: bool = False) -> Any:
     """Crea el controlador configurado; si falla, usa simulación y lo informa."""
     if simulate or config.driver == "sim":
@@ -139,6 +189,9 @@ def make_servo_backend(config: Any, simulate: bool = False) -> Any:
     try:
         if config.driver == "pca9685":
             return PCA9685Backend(config.pan_channel, config.tilt_channel, config.min_pulse_us, config.max_pulse_us)
+        if config.driver == "esp32":
+            return Esp32Backend(config.serial_port, config.pan_channel, config.tilt_channel,
+                                config.min_pulse_us, config.max_pulse_us)
         return GpioZeroBackend(
             config.pan_pin, config.tilt_pin, config.min_pulse_us, config.max_pulse_us,
             (clamp(config.rest_pan, 0, 180), clamp(config.rest_tilt, 0, 180)),

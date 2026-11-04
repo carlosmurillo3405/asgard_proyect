@@ -18,7 +18,7 @@ import numpy as np
 
 from .seguimiento import POSE_CONNECTIONS, BodyPose, vertical_fov
 
-# Plantilla de 33 landmarks (de la prueba de seguimiento corporal), en una caja 0..1.
+# Plantilla de 33 landmarks de MediaPipe Pose, en una caja 0..1.
 _TEMPLATE = (
     (0.50, 0.02), (0.47, 0.00), (0.46, 0.00), (0.44, 0.02),
     (0.53, 0.00), (0.54, 0.00), (0.56, 0.02), (0.40, 0.05),

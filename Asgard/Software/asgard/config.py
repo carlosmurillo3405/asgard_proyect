@@ -66,6 +66,7 @@ class ServoConfig:
     tilt_pin: int = 27
     pan_channel: int = 0
     tilt_channel: int = 1
+    serial_port: str = "auto"
     pan_min: float = 10.0
     pan_max: float = 170.0
     tilt_min: float = 40.0
@@ -153,7 +154,8 @@ SECTIONS: dict[str, tuple[str, dict[str, str]]] = {
     }),
     "servos": ("servos", {
         "controlador": "driver", "pin_pan": "pan_pin", "pin_tilt": "tilt_pin",
-        "canal_pan": "pan_channel", "canal_tilt": "tilt_channel", "pan_min": "pan_min",
+        "canal_pan": "pan_channel", "canal_tilt": "tilt_channel", "puerto_serie": "serial_port",
+        "pan_min": "pan_min",
         "pan_max": "pan_max", "tilt_min": "tilt_min", "tilt_max": "tilt_max",
         "reposo_pan": "rest_pan", "reposo_tilt": "rest_tilt", "pulso_min_us": "min_pulse_us",
         "pulso_max_us": "max_pulse_us", "velocidad_max": "speed", "invertir_pan": "invert_pan",
@@ -244,13 +246,17 @@ def validate(config: AsgardConfig) -> None:
     require(a.transport in ("auto", "tcp"), "[audio] transporte debe ser auto o tcp.")
     require(a.latency in ("low", "high"), "[audio] latencia debe ser low o high.")
     s = config.servos
-    require(s.driver in ("gpiozero", "pca9685", "sim"), "[servos] controlador: gpiozero, pca9685 o sim.")
+    require(s.driver in ("gpiozero", "pca9685", "esp32", "sim"), "[servos] controlador: gpiozero, pca9685, esp32 o sim.")
+    require(0 <= s.pan_channel <= 15 and 0 <= s.tilt_channel <= 15 and s.pan_channel != s.tilt_channel,
+            "[servos] canal_pan y canal_tilt deben ser distintos y estar entre 0 y 15.")
+    require(bool(s.serial_port), "[servos] puerto_serie: 'auto' o el puerto del ESP32 (por ejemplo /dev/ttyUSB0).")
     require(0 <= s.pan_min < s.pan_max <= 180, "[servos] pan_min/pan_max inválidos.")
     require(0 <= s.tilt_min < s.tilt_max <= 180, "[servos] tilt_min/tilt_max inválidos.")
     require(5 <= s.speed <= 400, "[servos] velocidad_max debe estar entre 5 y 400 °/s.")
     m = config.actuator
     require(m.kind in ("servo", "gpio", "sim", "ninguno"), "[mano] tipo: servo, gpio, sim o ninguno.")
-    require(m.driver in ("", "gpiozero", "pca9685", "sim"), "[mano] controlador: gpiozero, pca9685, sim o vacío.")
+    require(m.driver in ("", "gpiozero", "pca9685", "esp32", "sim"),
+            "[mano] controlador: gpiozero, pca9685, esp32, sim o vacío.")
     require(m.auto_lower_s >= 0, "[mano] bajar_automatico_s no puede ser negativo.")
     i = config.ai
     require(1 <= i.max_people <= 10, "[ia] max_personas debe estar entre 1 y 10.")

@@ -154,6 +154,11 @@ def test_servos(config_path: Path) -> int:
     servos = config.servos
     backend = make_servo_backend(servos)
     print(f"Controlador: {backend.name}")
+    if "PWM por software" in backend.name:
+        print("  Aviso: con PWM por software los servos pueden temblar o moverse solos cuando la CPU está ocupada.")
+        print("  Usa un ESP32 (controlador = esp32), un PCA9685 o pigpio (Raspberry Pi 4).")
+    elif getattr(backend, "simulated", False) and servos.driver != "sim":
+        print("  No se pudo usar el controlador configurado; revisa el mensaje de arriba.")
     pantilt = PanTilt(backend, (servos.pan_min, servos.pan_max), (servos.tilt_min, servos.tilt_max),
                       servos.speed, (servos.rest_pan, servos.rest_tilt))
     path = [
@@ -174,6 +179,10 @@ def test_servos(config_path: Path) -> int:
                 time.sleep(0.05)
             time.sleep(0.6)
         print("Si algún eje se movió al revés, cambia invertir_pan/invertir_tilt en asgard.ini.")
+        link = getattr(backend, "link", None)
+        if link is not None and link.resets:
+            print(f"  Aviso: el ESP32 se reinició {link.resets} vez/veces durante la prueba (último motivo: "
+                  f"{link.last_reset}). Casi siempre es la alimentación: ver «Conexión con ESP32» en el README.")
     finally:
         pantilt.close()
     return 0
@@ -304,6 +313,7 @@ def check_installation(config_path: Path) -> int:
         ("IA (MediaPipe)", "import mediapipe"),
         ("Servos por GPIO (gpiozero)", "import gpiozero"),
         ("Servos por I2C (PCA9685)", "import adafruit_servokit"),
+        ("Servos por ESP32 (pyserial)", "from asgard.esp32 import describe_ports; detalle = describe_ports()"),
         ("Cámara CSI (picamera2)", "import picamera2"),
     ]
     problems = 0

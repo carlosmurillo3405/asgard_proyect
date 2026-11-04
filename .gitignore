@@ -3,27 +3,26 @@
 venv/
 __pycache__/
 *.py[cod]
-.pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Downloaded MediaPipe model
-/Pruebas/Functions/Midgard_IA_recognition/pose_landmarker_heavy.task
+# Configuración local de los editores
+/.idea/
 
 # Datos y archivos generados por los programas (no se versionan)
-/Bifr*st/datos/
+/Bifrost/datos/
 /Asgard/Software/asgard.ini
 /Asgard/Software/estado_asgard.json
 /Asgard/Software/estado_asgard.tmp
 /Asgard/Software/modelos/
 /Asgard/Software/registros/
 /Asgard/Software/.restricciones-pip.txt
-/Midgard/Software/build/
-/Midgard/Software/dist/
-/Midgard/Software/iniciar_midgard.bat
-/Midgard/Software/midgard.sh
-/Midgard/Software/Midgard.command
+/Midgard/build/
+/Midgard/dist/
+/Midgard/iniciar_midgard.bat
+/Midgard/midgard.sh
+/Midgard/Midgard.command
 *.log
-/Midgard/Software/midgard.ico
-/Midgard/Software/midgard.png
+/Midgard/midgard.ico
+/Midgard/midgard.png
 /Demo/datos/

@@ -18,11 +18,11 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 COMUN = RAIZ / "Comun"
 
-_CLIENTES = ["Asgard/Software/asgard", "Midgard/Software/midgard"]
+_CLIENTES = ["Asgard/Software/asgard", "Midgard/midgard"]
 
 # Módulo (o carpeta) compartido -> paquetes que lo usan.
 DESTINOS: dict[str, list[str]] = {
-    "protocolo.py": [*_CLIENTES, "Bifröst/bifrost"],
+    "protocolo.py": [*_CLIENTES, "Bifrost/bifrost"],
     "red_cliente.py": _CLIENTES,
     "audio.py": _CLIENTES,
     "imagen.py": _CLIENTES,

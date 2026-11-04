@@ -33,10 +33,12 @@ Cada programa lleva su **copia** de estos módulos, para que Asgard, Midgard y B
 
 ```bash
 python Comun/sincronizar.py              # copia los módulos a cada programa
-python Comun/sincronizar.py --comprobar  # verifica (también lo hacen las pruebas)
+python Comun/sincronizar.py --comprobar  # verifica que las copias estén al día
 ```
 
-No edites las copias: las pruebas fallan si alguna difiere de la original.
+No edites las copias: el siguiente `sincronizar.py` las sobrescribe con la original.
+
+`entorno.py` (lo llaman `instalar_entorno.bat` y `.sh` de la raíz) prepara el `.venv` de la raíz con `requirements-entorno.txt` y MediaPipe, para usar todos los programas en una PC de desarrollo.
 
 ## Protocolo (versión 2)
 
@@ -52,8 +54,6 @@ La versión 2 separa el **inicio de sesión del usuario** (`auth`) de la **apert
 | Descubrimiento | UDP 8767 (difusión) | Búsqueda de Bifröst en modo local |
 
 ### Paquete TCP
-
-Es el mismo formato de las pruebas de video y de pantalla compartida:
 
 ```
 [longitud del cuerpo: uint32 BE][tipo: 1 byte ASCII][longitud JSON: uint32 BE][JSON UTF-8][datos binarios]
@@ -143,11 +143,3 @@ nonce: dirección u8 (0 = al servidor, 1 = al cliente) | 3 bytes en cero | secue
 ### Descubrimiento
 
 El cliente difunde `BIFROST?1` al puerto UDP 8767. Bifröst, en modo local, responde `BIFROST!` seguido de un JSON con `{name, port, audio_port, tls, fingerprint, version, mode, instance}`.
-
-## Pruebas
-
-```bash
-python -m unittest discover -s Comun/tests -t .     # desde la raíz del repositorio
-```
-
-Las pruebas del kit visual usan Qt en modo `offscreen` (no abren ventanas) y se omiten si no hay Qt instalado.

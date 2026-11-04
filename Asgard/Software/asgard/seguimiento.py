@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Reconocimiento corporal con IA y dirección de la cámara Pan/Tilt.
 
-Basado en la prueba ``seguidor_corporal_pantilt.py`` (MediaPipe Pose
-Landmarker + control proporcional). Agrega:
+MediaPipe Pose Landmarker con control proporcional de los servos. Además:
 
 * coordenadas normalizadas (0..1) para que Midgard dibuje y elija personas
   sobre el video sin importar su resolución;
@@ -183,7 +182,7 @@ class MediaPipePoseDetector:
 
 
 class CallbackPoseDetector:
-    """Detector que obtiene las poses de una función (simulación y pruebas)."""
+    """Detector que obtiene las poses de una función (simulación)."""
 
     def __init__(self, source: Callable[[], list[BodyPose]], name: str = "Detector simulado") -> None:
         self._source = source

@@ -1,0 +1,2 @@
+# Solo si los servos o la mano usan un ESP32 por USB ([servos] controlador = esp32).
+pyserial>=3.5

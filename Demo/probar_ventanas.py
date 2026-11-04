@@ -33,7 +33,7 @@ DATOS = DEMO / "datos"
 DATOS.mkdir(exist_ok=True)
 os.environ["APPDATA"] = str(DATOS)            # Windows: ajustes de Midgard aislados
 os.environ["XDG_CONFIG_HOME"] = str(DATOS)    # Linux
-sys.path.insert(0, str(RAIZ / "Midgard" / "Software"))
+sys.path.insert(0, str(RAIZ / "Midgard"))
 sys.path.insert(0, str(RAIZ / "Asgard" / "Software"))
 
 import cv2  # noqa: E402

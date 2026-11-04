@@ -1,29 +1,29 @@
 @echo off
 rem Demostracion de las ventanas (sin red, servidor ni hardware): doble clic en este archivo.
 rem Opciones: ambas (predeterminado), midgard o asgard. Ejemplo: probar_ventanas.bat midgard
+rem Usa el entorno .venv de la raiz; si falta, lo prepara solo la primera vez.
 setlocal
 chcp 65001 >nul
-set "PY=%~dp0..\Midgard\Software\.venv\Scripts\python.exe"
-if not exist "%PY%" (
-    echo No se encontro el entorno de Midgard.
-    echo Ejecuta primero Midgard\Software\instalar_windows.bat y vuelve a abrir este archivo.
-    echo.
-    pause
-    exit /b 1
-)
-"%PY%" -c "import PySide6.QtWidgets" >nul 2>&1
-if errorlevel 1 (
-    echo Instalando la interfaz Qt en el entorno de Midgard...
-    "%PY%" -m pip install -r "%~dp0..\Midgard\Software\requirements.txt"
-    if errorlevel 1 (
-        echo No se pudo instalar. Revisa la conexion a Internet.
-        pause
-        exit /b 1
-    )
-)
+set "RAIZ=%~dp0.."
+set "PY=%RAIZ%\.venv\Scripts\python.exe"
+if not exist "%PY%" goto preparar
+"%PY%" -c "import cv2, PySide6.QtWidgets" >nul 2>&1
+if not errorlevel 1 goto correr
+:preparar
+echo Preparando el entorno de esta PC (solo la primera vez)...
+set "ASGARD_SIN_PAUSA=1"
+call "%RAIZ%\instalar_entorno.bat"
+if errorlevel 1 goto error_entorno
+:correr
 "%PY%" "%~dp0probar_ventanas.py" %*
-if errorlevel 1 (
-    echo.
-    echo La demostracion termino con un error; el detalle esta arriba.
-    pause
-)
+if errorlevel 1 goto error_demo
+exit /b 0
+:error_entorno
+echo No se pudo preparar el entorno; el detalle esta arriba.
+pause
+exit /b 1
+:error_demo
+echo.
+echo La demostracion termino con un error; el detalle esta arriba.
+pause
+exit /b 1

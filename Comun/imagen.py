@@ -4,9 +4,8 @@
 ARCHIVO COMPARTIDO: la versión original está en ``Comun/imagen.py``; se copia
 a cada programa con ``python Comun/sincronizar.py``.
 
-Reúne lo que funcionó en las pruebas de video y pantalla compartida:
-perfiles de calidad que nunca amplían la imagen, decodificación reducida
-según el tamaño del panel y captura que conserva solo el cuadro más reciente.
+Perfiles de calidad que nunca amplían la imagen, decodificación reducida según
+el tamaño del panel y captura que conserva solo el cuadro más reciente.
 """
 
 from __future__ import annotations
@@ -39,14 +38,14 @@ class VideoProfile:
         )
 
 
-# Perfiles de la prueba de transmisión de video (cámara de Midgard).
+# Perfiles de la cámara de Midgard.
 CAMERA_PROFILES: dict[str, VideoProfile] = {
     "Mala": VideoProfile(640, 360, 12, 45),
     "Media": VideoProfile(1280, 720, 20, 70),
     "Buena": VideoProfile(1920, 1080, 30, 90),
 }
 
-# Perfiles de la prueba de pantalla compartida.
+# Perfiles de la pantalla compartida.
 SCREEN_PROFILES: dict[str, VideoProfile] = {
     "Mala": VideoProfile(640, 360, 12, 50),
     "Media": VideoProfile(1280, 720, 20, 75),
