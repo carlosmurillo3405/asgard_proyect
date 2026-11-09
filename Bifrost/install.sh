@@ -154,9 +154,10 @@ mkdir -p "$TARGET" "$DATA"
 rm -rf "$TARGET/bifrost"
 cp -r "$SOURCE/bifrost" "$TARGET/"
 cp "$SOURCE/main.py" "$SOURCE/requirements.txt" "$TARGET/"
-for readme in README.md README.es.md; do
-    [ -f "$SOURCE/$readme" ] && cp "$SOURCE/$readme" "$TARGET/"
+for extra in README.md README.es.md uninstall.sh; do
+    [ -f "$SOURCE/$extra" ] && cp "$SOURCE/$extra" "$TARGET/"
 done
+[ -f "$TARGET/uninstall.sh" ] && chmod 755 "$TARGET/uninstall.sh"
 find "$TARGET" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 info "$(t "Creating the virtual environment and installing dependencies" "Creando el entorno virtual e instalando dependencias")"
@@ -298,3 +299,4 @@ fi
 echo "  $(t "Check whether it is running:" "Ver si está en ejecución:")"
 echo "    bifrost status            # $(t summary resumen)"
 echo "    bifrost monitor           # $(t "live view with a status bar (Ctrl+C to leave)" "vista en vivo con barra de estado (Ctrl+C para salir)")"
+echo "  $(t "To uninstall it:" "Para desinstalarlo:") sudo $TARGET/uninstall.sh"

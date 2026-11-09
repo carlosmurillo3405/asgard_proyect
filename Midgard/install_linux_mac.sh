@@ -206,3 +206,4 @@ fi
 
 echo
 info "$(t "Midgard is ready: $LAUNCHER" "Midgard está listo: $LAUNCHER")"
+echo "    $(t "To uninstall it: ./uninstall_linux_mac.sh" "Para desinstalarlo: ./uninstall_linux_mac.sh")"

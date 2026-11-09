@@ -160,6 +160,28 @@ if (-not $NoShortcut) {
     Info (T "Shortcuts created on the Desktop and in the Start menu." "Accesos directos creados en el Escritorio y en el menú Inicio.")
 }
 
+# Entrada en Configuración > Aplicaciones: desde ahí también se puede desinstalar.
+$uninstaller = Join-Path $Dir "uninstall_windows.ps1"
+if (Test-Path $uninstaller) {
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AsgardSystem.Midgard"
+    $versionFile = Join-Path $Dir "midgard\__init__.py"
+    $match = Select-String -Path $versionFile -Pattern '__version__ = "([^"]+)"' -ErrorAction SilentlyContinue
+    $appVersion = if ($match) { $match.Matches[0].Groups[1].Value } else { "" }
+    $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstaller`""
+    New-Item -Path $key -Force | Out-Null
+    Set-ItemProperty -Path $key -Name "DisplayName" -Value "Midgard"
+    Set-ItemProperty -Path $key -Name "DisplayVersion" -Value $appVersion
+    Set-ItemProperty -Path $key -Name "Publisher" -Value "Asgard System"
+    Set-ItemProperty -Path $key -Name "InstallLocation" -Value $Dir
+    Set-ItemProperty -Path $key -Name "InstallDate" -Value (Get-Date -Format "yyyyMMdd")
+    Set-ItemProperty -Path $key -Name "UninstallString" -Value "$command -Pause"
+    Set-ItemProperty -Path $key -Name "QuietUninstallString" -Value "$command -Yes"
+    if (Test-Path $icon) { Set-ItemProperty -Path $key -Name "DisplayIcon" -Value "$icon,0" }
+    New-ItemProperty -Path $key -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $key -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
+    Info (T "Registered in Settings > Apps (Midgard can be uninstalled from there)." "Registrado en Configuración > Aplicaciones (desde ahí se puede desinstalar Midgard).")
+}
+
 if ($Executable) {
     Info (T "Building the standalone executable" "Construyendo el ejecutable independiente")
     & $venvPython (Join-Path $Dir "build_executable.py")
@@ -168,3 +190,4 @@ if ($Executable) {
 
 Write-Host ""
 Info (T "Midgard is ready. Open it with the shortcut or with start_midgard.bat" "Midgard está listo. Ábrelo con el acceso directo o con start_midgard.bat")
+Write-Host "    $(T 'To uninstall it: uninstall_windows.bat, or Settings > Apps > Midgard' 'Para desinstalarlo: uninstall_windows.bat, o Configuración > Aplicaciones > Midgard')"

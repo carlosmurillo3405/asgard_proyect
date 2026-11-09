@@ -91,6 +91,14 @@ def main(argv: list[str] | None = None) -> int:
     if server.is_file() and system != "Darwin":
         # También junto al ejecutable, donde el administrador puede editarlo.
         shutil.copyfile(server, target.parent / "server.json")
+    # El desinstalador viaja con el ejecutable (en macOS, junto a Midgard.app).
+    folder = HERE / "dist" if system == "Darwin" else target.parent
+    names = ("uninstall_windows.ps1", "uninstall_windows.bat") if system == "Windows" else ("uninstall_linux_mac.sh",)
+    for name in names:
+        copy = folder / name
+        shutil.copyfile(HERE / name, copy)
+        if name.endswith(".sh"):
+            copy.chmod(0o755)
     print("\n" + tr("Done: {target}", target=target))
     if not server.is_file():
         print(tr("No server.json: the executable will look for Bifröst on the local network."))
