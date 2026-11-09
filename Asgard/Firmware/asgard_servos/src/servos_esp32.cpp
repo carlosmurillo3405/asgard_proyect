@@ -1,10 +1,16 @@
-#include "servos.h"
+// PWM por hardware del ESP32 (LEDC): 50 Hz con 14 bits, 1,22 µs por paso.
+
+#if defined(ARDUINO_ARCH_ESP32)
 
 #include "config.h"
+#include "servos.h"
 
 namespace servos {
 
 static uint16_t pulse_us[CHANNELS];   // 0 = suelto
+
+constexpr uint32_t FREQUENCY_HZ = 1000000UL / PERIOD_US;
+constexpr uint8_t RESOLUTION_BITS = 14;
 
 // Núcleo 3.x: ledcAttach/ledcWrite por pin. Núcleo 2.x: ledcSetup/ledcAttachPin por canal.
 static void prepare(uint8_t channel) {
@@ -54,3 +60,5 @@ uint16_t pulse(uint8_t channel) {
 }
 
 }  // namespace servos
+
+#endif  // ARDUINO_ARCH_ESP32

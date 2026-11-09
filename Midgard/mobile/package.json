@@ -1,0 +1,19 @@
+{
+  "name": "midgard-mobile",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Midgard for Android and iOS: Midgard Web packaged with Capacitor (build it with build_mobile.py).",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  }
+}

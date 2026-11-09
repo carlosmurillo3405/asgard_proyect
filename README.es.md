@@ -9,9 +9,10 @@ Sistema de telepresencia para el aula. Un **Asgard** (Raspberry Pi con cámara, 
 | **Asgard** | Raspberry Pi del aula | Cliente dedicado: emite audio y video en máxima calidad, sigue personas con IA, mueve los servos, acciona la mano y, en su pantalla, muestra quién está conectado, su pantalla compartida, la mano y los mensajes. | [Asgard/Software/README.es.md](Asgard/Software/README.es.md) |
 | **Bifröst** | Servidor Linux (red local o Internet) | Puente: autentica usuarios y Asgard contra su base de datos, muestra a cada usuario sus Asgard, enlaza las sesiones y retransmite todo. En la terminal se ve en vivo que está en ejecución. | [Bifrost/README.es.md](Bifrost/README.es.md) |
 | **Midgard** | PC del usuario (Windows, Linux o macOS) | Cliente de usuario: inicio de sesión, lista de sus Asgard, llamada con control de cámara, seguimiento, chat, mano, pantalla compartida, dispositivos y calidad; vista avanzada para desarrolladores. | [Midgard/README.es.md](Midgard/README.es.md) |
+| **Midgard Web** y **apps** | Navegador, Android e iOS | La misma interfaz de Midgard sin instalar nada (la sirve Bifröst en su puerto web, 8080) y empaquetada como apps de Android e iOS. | [Midgard/web](Midgard/web/README.es.md) · [Midgard/mobile](Midgard/mobile/README.es.md) |
 | Common | — | Código compartido, kit visual (plantilla «UI-Asgard»), idiomas y referencia del protocolo. | [Common/README.es.md](Common/README.es.md) |
 
-Las interfaces de Midgard y de la pantalla del aula siguen la plantilla de diseño «UI-Asgard»: tema oscuro, tipografía Inter, el logotipo y el patrón de runas, diseño adaptable a cualquier tamaño de ventana y animaciones suaves. Están hechas con Qt (PySide6 en las PC; PyQt6 o PyQt5 de Raspberry Pi OS en el aula).
+Las interfaces de Midgard y de la pantalla del aula siguen la plantilla de diseño «UI-Asgard»: tema oscuro, tipografía Inter, el logotipo y el patrón de runas, diseño adaptable a cualquier tamaño de ventana y animaciones suaves. Están hechas con Qt (PySide6 en las PC; PyQt6 o PyQt5 de Raspberry Pi OS en el aula); Midgard Web y las apps móviles copian el mismo diseño en HTML y CSS.
 
 ## Idiomas
 
@@ -45,6 +46,7 @@ Los mensajes que viajan por la red (errores del servidor, avisos del Asgard) se 
 - **Midgard** inicia sesión primero (usuario y contraseña verificados en la base de datos de Bifröst); luego ve solo los Asgard a los que tiene permiso y entra a uno.
 - **Asgard** se mantiene conectado a Bifröst en reposo. Cuando un usuario con permiso entra desde Midgard, se activa solo y empieza a emitir.
 - **Bifröst** funciona en `--mode local` (red de la escuela, con búsqueda automática) o `--mode public` (Internet, con TLS obligatorio).
+- **Midgard Web** y las **apps móviles** llegan a Bifröst por su puerto web (TCP 8080, WebSocket) y se comportan como el Midgard de escritorio.
 - Video: JPEG con descarte de cuadros viejos, para que no se acumule retraso. Audio: PCM de 48 kHz y 16 bits por UDP cifrado, con respaldo automático por TCP.
 - Si la red se corta, los clientes se reconectan y la sesión se reanuda sola.
 
@@ -67,7 +69,7 @@ Los mensajes que viajan por la red (errores del servidor, avisos del Asgard) se 
 
 ### Por Internet
 
-1. Instala Bifröst en un servidor con IP pública (`sudo ./install.sh --mode public --public-name <dominio o IP> --open-firewall`) y abre TCP 8765 y UDP 5004.
+1. Instala Bifröst en un servidor con IP pública (`sudo ./install.sh --mode public --public-name <dominio o IP> --open-firewall`) y abre TCP 8765 y 8080 y UDP 5004.
 2. En el Asgard usa `--server <dominio> --fingerprint <huella de 'bifrost fingerprint'>`.
 3. Crea el archivo de conexión de Midgard: `bifrost client --server <dominio> --tls --output server.json`, cópialo en `Midgard/` e instala (o construye el ejecutable). Así cada usuario ya tiene asignado el servidor y solo escribe su usuario y contraseña.
 
@@ -124,10 +126,12 @@ asgard_proyect/
 ├─ setup_env.bat / .sh          entorno .venv de esta PC (cv2, Qt, IA…)
 ├─ Asgard/                      equipo del aula
 │  ├─ Software/                 programa de la Raspberry Pi: main.py, asgard/, install.sh, asgard.example.ini
-│  ├─ Firmware/                 ESP32 que controla los servos (proyecto PlatformIO)
+│  ├─ Firmware/                 Arduino Uno que controla los servos (proyecto PlatformIO)
 │  └─ Hardware/                 modelos 3D de la carcasa
 ├─ Bifrost/                     servidor: main.py, bifrost/, install.sh
 ├─ Midgard/                     PC del usuario: main.py, midgard/, instaladores (Windows, Linux/macOS)
+│  ├─ web/                      Midgard Web (navegador), la sirve Bifröst
+│  └─ mobile/                   apps de Android e iOS (Capacitor)
 ├─ Common/                      código compartido (fuente única): protocolo, red, audio, imagen, idiomas
 │                               y kit visual, más sync.py, setup_env.py y la referencia del protocolo
 └─ Demo/                        demostración de las ventanas sin red ni hardware
@@ -140,7 +144,7 @@ Cada programa se instala por separado con su propio instalador y archivo `requir
 Los módulos compartidos (y los catálogos de idioma comunes) se editan solo en `Common/`; cada programa lleva una copia para poder instalarse por separado:
 
 ```bash
-python Common/sync.py           # copia los módulos a Asgard, Midgard y Bifröst
+python Common/sync.py           # copia los módulos a Asgard, Midgard y Bifröst (y actualiza Midgard Web)
 python Common/sync.py --check   # verifica que las copias estén al día
 ```
 

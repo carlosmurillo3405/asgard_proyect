@@ -1,0 +1,20 @@
+{
+  "appId": "mx.udg.asgard.midgard",
+  "appName": "Midgard",
+  "webDir": "www",
+  "backgroundColor": "#1a1a1a",
+  "loggingBehavior": "debug",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#1a1a1a"
+  },
+  "ios": {
+    "backgroundColor": "#1a1a1a",
+    "contentInset": "never",
+    "scrollEnabled": false
+  }
+}

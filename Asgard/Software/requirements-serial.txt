@@ -1,0 +1,3 @@
+# Only when the servos or the hand use a board over the serial port: an Arduino Uno
+# (recommended) or an ESP32 ([servos] driver = arduino or esp32).
+pyserial>=3.5

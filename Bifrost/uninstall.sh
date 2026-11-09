@@ -16,6 +16,8 @@ set -euo pipefail
 PURGE=""            # "" = preguntar, 1 = borrar los datos, 0 = conservarlos
 FIREWALL=""         # "" = preguntar, 1 = cerrar los puertos, 0 = dejarlos
 BACKUP=""
+BACKUP_DONE=0
+BACKUP_FILES=()
 YES=0
 DRY_RUN=0
 ENV_ONLY=0
@@ -116,15 +118,22 @@ safe_dir() {
 
 backup_data() {
     local data="$1" target="$2"
+    # Con varias carpetas de datos (data/ y datos/ de la 1.x) cada copia lleva su propio nombre.
+    if [ "$BACKUP_DONE" -eq 1 ]; then
+        target="${target%.tar.gz}-$(basename "$data").tar.gz"
+    fi
     info "$(t "Saving a copy of $data in $target" "Guardando una copia de $data en $target")"
+    BACKUP_FILES+=("$target")
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '   [dry-run] tar -czf %s -C %s %s\n' "$target" "$(dirname "$data")" "$(basename "$data")"
+        BACKUP_DONE=1
         return 0
     fi
     mkdir -p "$(dirname "$target")"
     tar -czf "$target" -C "$(dirname "$data")" "$(basename "$data")" \
         || error "$(t "The backup could not be created; nothing was deleted." "No se pudo crear la copia; no se borró nada.")"
     chmod 600 "$target"
+    BACKUP_DONE=1
 }
 
 decide_data() {
@@ -169,6 +178,7 @@ if [ "$ENV_ONLY" -eq 1 ]; then
         if [ "$PURGE" -eq 1 ]; then
             safe_dir "$data" || error "$(t "$data does not look like a Bifröst data folder; it was not deleted." \
                                           "$data no parece una carpeta de datos de Bifröst; no se borró.")"
+            info "$(t "Deleting the data in $data" "Borrando los datos de $data")"
             run rm -rf "$data"
         else
             info "$(t "The data stays in $data." "Los datos quedan en $data.")"
@@ -191,12 +201,13 @@ SYSTEM_USER="bifrost"
 PORT=8765
 AUDIO_PORT=5004
 DISCOVERY_PORT=8767
+WEB_PORT=""
 MODE="local"
 if [ -f "$UNIT" ]; then
     EXEC="$(grep -E '^ExecStart=' "$UNIT" | head -1 || true)"
     python_path="$(printf '%s' "$EXEC" | grep -oE "/[^ '\"]+/\.venv/bin/python" | head -1 || true)"
     [ -n "$python_path" ] && TARGET="${python_path%/.venv/bin/python}"
-    data_env="$(grep -oE 'BIFROST_DATA(OS)?=[^ "]+' "$UNIT" | head -1 | cut -d= -f2- || true)"
+    data_env="$(grep -oE 'BIFROST_DAT(A|OS)=[^ "]+' "$UNIT" | head -1 | cut -d= -f2- || true)"
     [ -n "$data_env" ] && DATA="$data_env"
     unit_user="$(grep -E '^User=' "$UNIT" | head -1 | cut -d= -f2- || true)"
     [ -n "$unit_user" ] && SYSTEM_USER="$unit_user"
@@ -204,6 +215,8 @@ if [ -f "$UNIT" ]; then
     PORT="$(option 'port|puerto')"; PORT="${PORT:-8765}"
     AUDIO_PORT="$(option 'audio-port|puerto-audio')"; AUDIO_PORT="${AUDIO_PORT:-5004}"
     MODE="$(option 'mode|modo')"; MODE="${MODE:-local}"
+    # Solo las instalaciones con Midgard Web abren el puerto web (las anteriores no lo tocaban).
+    WEB_PORT="$(option 'web-port')"
 fi
 
 FOUND=0
@@ -221,7 +234,7 @@ fi
 
 echo
 info "$(t "Bifröst installation found:" "Instalación de Bifröst encontrada:")"
-[ -f "$UNIT" ] && echo "  $(t "Service:" "Servicio:")   $UNIT ($(t "mode" "modo") $MODE, TCP $PORT, UDP $AUDIO_PORT)"
+[ -f "$UNIT" ] && echo "  $(t "Service:" "Servicio:")   $UNIT ($(t "mode" "modo") $MODE, TCP $PORT${WEB_PORT:+ $(t and y) $WEB_PORT}, UDP $AUDIO_PORT)"
 [ -d "$TARGET" ] && echo "  $(t "Program:" "Programa:")   $TARGET"
 [ -f "$COMMAND" ] && echo "  $(t "Command:" "Comando:")    $COMMAND"
 [ -d "$DATA" ] && echo "  $(t "Data:" "Datos:")      $DATA"
@@ -247,7 +260,7 @@ fi
 
 # 2. Comando de administración (solo si es el que creó el instalador).
 if [ -f "$COMMAND" ]; then
-    if grep -q "BIFROST_DATA" "$COMMAND" 2>/dev/null && grep -q "main.py" "$COMMAND" 2>/dev/null; then
+    if grep -qE "BIFROST_DAT(A|OS)" "$COMMAND" 2>/dev/null && grep -q "main.py" "$COMMAND" 2>/dev/null; then
         info "$(t "Removing the $COMMAND command" "Quitando el comando $COMMAND")"
         run rm -f "$COMMAND"
     else
@@ -259,11 +272,11 @@ fi
 RULES=()
 if command -v ufw >/dev/null 2>&1; then
     ufw_status="$(ufw status 2>/dev/null || true)"
-    for rule in "$PORT/tcp" "$AUDIO_PORT/udp" "$DISCOVERY_PORT/udp"; do
+    for rule in "$PORT/tcp" "$AUDIO_PORT/udp" "$DISCOVERY_PORT/udp" ${WEB_PORT:+"$WEB_PORT/tcp"}; do
         printf '%s\n' "$ufw_status" | grep -qE "^${rule}[[:space:]]" && RULES+=("ufw:$rule")
     done
 elif command -v firewall-cmd >/dev/null 2>&1; then
-    for rule in "$PORT/tcp" "$AUDIO_PORT/udp" "$DISCOVERY_PORT/udp"; do
+    for rule in "$PORT/tcp" "$AUDIO_PORT/udp" "$DISCOVERY_PORT/udp" ${WEB_PORT:+"$WEB_PORT/tcp"}; do
         firewall-cmd --permanent --query-port="$rule" >/dev/null 2>&1 && RULES+=("firewalld:$rule")
     done
 fi
@@ -344,7 +357,7 @@ if [ -d "$DATA" ] && [ "${PURGE:-0}" -ne 1 ]; then
                  "Los datos quedan en $DATA y se conserva el usuario '$SYSTEM_USER': al volver a ejecutar install.sh se recuperan usuarios, Asgard y certificados.")"
     echo "  $(t "To delete them later: sudo ./uninstall.sh --purge" "Para borrarlos después: sudo ./uninstall.sh --purge")"
 fi
-[ -n "$BACKUP" ] && echo "  $(t "Data copy:" "Copia de los datos:") $BACKUP"
+for copy in "${BACKUP_FILES[@]+"${BACKUP_FILES[@]}"}"; do echo "  $(t "Data copy:" "Copia de los datos:") $copy"; done
 echo "  $(t "System packages (python3-venv, python3-pip) were left installed; other programs may use them." \
              "Los paquetes del sistema (python3-venv, python3-pip) siguen instalados; otros programas pueden usarlos.")"
 echo "  $(t "Old logs stay in the journal: journalctl -u bifrost" "Los registros antiguos siguen en el diario: journalctl -u bifrost")"

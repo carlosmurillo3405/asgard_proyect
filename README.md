@@ -9,9 +9,10 @@ Classroom telepresence system. An **Asgard** (a Raspberry Pi with camera, microp
 | **Asgard** | Classroom Raspberry Pi | Dedicated client: streams audio and video in top quality, follows people with AI, moves the servos, drives the hand and, on its screen, shows who is connected, their shared screen, the hand and the messages. | [Asgard/Software/README.md](Asgard/Software/README.md) |
 | **Bifröst** | Linux server (local network or Internet) | Bridge: authenticates users and Asgards against its database, shows each user their Asgards, links the sessions and relays everything. The terminal shows live that it is running. | [Bifrost/README.md](Bifrost/README.md) |
 | **Midgard** | User's PC (Windows, Linux or macOS) | User client: sign-in, list of their Asgards, call with camera control, tracking, chat, hand, shared screen, devices and quality; advanced view for developers. | [Midgard/README.md](Midgard/README.md) |
+| **Midgard Web** and **apps** | Browser, Android and iOS | The same Midgard interface without installing anything (served by Bifröst on its web port, 8080), and packaged as Android and iOS apps. | [Midgard/web](Midgard/web/README.md) · [Midgard/mobile](Midgard/mobile/README.md) |
 | Common | — | Shared code, visual kit («UI-Asgard» template), languages and protocol reference. | [Common/README.md](Common/README.md) |
 
-The interfaces of Midgard and of the classroom screen follow the «UI-Asgard» design template: dark theme, Inter typeface, the logo and the rune pattern, a layout that adapts to any window size and smooth animations. They are built with Qt (PySide6 on PCs; Raspberry Pi OS's PyQt6 or PyQt5 in the classroom).
+The interfaces of Midgard and of the classroom screen follow the «UI-Asgard» design template: dark theme, Inter typeface, the logo and the rune pattern, a layout that adapts to any window size and smooth animations. They are built with Qt (PySide6 on PCs; Raspberry Pi OS's PyQt6 or PyQt5 in the classroom); Midgard Web and the mobile apps copy the same design in HTML and CSS.
 
 ## Languages
 
@@ -45,6 +46,7 @@ Messages that travel over the network (server errors, Asgard notices) are sent a
 - **Midgard** signs in first (username and password checked in Bifröst's database); then it sees only the Asgards it has permission for and enters one.
 - **Asgard** stays connected to Bifröst while idle. When a user with permission enters from Midgard, it wakes up by itself and starts streaming.
 - **Bifröst** runs in `--mode local` (school network, with automatic discovery) or `--mode public` (Internet, with mandatory TLS).
+- **Midgard Web** and the **mobile apps** reach Bifröst through its web port (TCP 8080, WebSocket) and behave like the desktop Midgard.
 - Video: JPEG dropping old frames, so no delay builds up. Audio: 48 kHz 16-bit PCM over encrypted UDP, with automatic TCP fallback.
 - When the network drops, clients reconnect and the session resumes by itself.
 
@@ -67,7 +69,7 @@ Messages that travel over the network (server errors, Asgard notices) are sent a
 
 ### Over the Internet
 
-1. Install Bifröst on a server with a public IP (`sudo ./install.sh --mode public --public-name <domain or IP> --open-firewall`) and open TCP 8765 and UDP 5004.
+1. Install Bifröst on a server with a public IP (`sudo ./install.sh --mode public --public-name <domain or IP> --open-firewall`) and open TCP 8765 and 8080 and UDP 5004.
 2. On the Asgard use `--server <domain> --fingerprint <fingerprint from 'bifrost fingerprint'>`.
 3. Create Midgard's connection file: `bifrost client --server <domain> --tls --output server.json`, copy it into `Midgard/` and install (or build the executable). That way every user already has the server assigned and only types their username and password.
 
@@ -124,10 +126,12 @@ asgard_proyect/
 ├─ setup_env.bat / .sh          .venv environment for this PC (cv2, Qt, AI…)
 ├─ Asgard/                      classroom device
 │  ├─ Software/                 Raspberry Pi program: main.py, asgard/, install.sh, asgard.example.ini
-│  ├─ Firmware/                 ESP32 that drives the servos (PlatformIO project)
+│  ├─ Firmware/                 Arduino Uno that drives the servos (PlatformIO project)
 │  └─ Hardware/                 3D models of the case
 ├─ Bifrost/                     server: main.py, bifrost/, install.sh
 ├─ Midgard/                     user's PC: main.py, midgard/, installers (Windows, Linux/macOS)
+│  ├─ web/                      Midgard Web (browser), served by Bifröst
+│  └─ mobile/                   Android and iOS apps (Capacitor)
 ├─ Common/                      shared code (single source): protocol, network, audio, imaging, languages
 │                               and visual kit, plus sync.py, setup_env.py and the protocol reference
 └─ Demo/                        demo of the windows without network or hardware
@@ -140,7 +144,7 @@ Each program is installed separately with its own installer and `requirements.tx
 The shared modules (and the common language catalogs) are edited only in `Common/`; every program carries a copy so it can be installed separately:
 
 ```bash
-python Common/sync.py           # copies the modules to Asgard, Midgard and Bifröst
+python Common/sync.py           # copies the modules to Asgard, Midgard and Bifröst (and updates Midgard Web)
 python Common/sync.py --check   # checks that the copies are up to date
 ```
 

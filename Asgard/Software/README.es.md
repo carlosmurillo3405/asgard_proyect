@@ -33,7 +33,7 @@ Atajos: **F11** alterna la pantalla completa y **Ctrl+Q** cierra. En pantalla co
 | --- | --- | --- |
 | Computadora | Raspberry Pi 5 o 4 (4 GB+) con **Raspberry Pi OS de 64 bits** | MediaPipe necesita 64 bits. |
 | Cámara | USB (UVC, MJPG 1080p) o Camera Module (CSI) | `camera = 0` o `camera = picamera2`. |
-| Servos pan/tilt | 2 servos (SG90, MG90S, MG996R…) en soporte pan/tilt | Mediante un **ESP32 por USB (recomendado)**, un PCA9685 o directo a GPIO. |
+| Servos pan/tilt | 2 servos (SG90, MG90S, MG996R…) en soporte pan/tilt | Mediante un **Arduino Uno por USB (recomendado)**, un PCA9685 o directo a GPIO. |
 | Mano | 1 servo, o un relé/solenoide | `[hand] type = servo` o `gpio`. |
 | Audio | Micrófono USB (o de conferencia) y altavoz | Mejor un altavoz-micrófono con cancelación de eco. |
 | Pantalla | Monitor o proyector HDMI | Opcional (`mode = none`). |
@@ -48,33 +48,34 @@ Atajos: **F11** alterna la pantalla completa y **Ctrl+Q** cierra. En pantalla co
 | PCA9685 SDA / SCL | GPIO 2 / GPIO 3 | 3 / 5 |
 | PCA9685 VCC (lógica) | 3,3 V | 1 |
 
-> **Alimenta los servos con una fuente externa de 5–6 V** y une su GND con el de la Raspberry (o del ESP32). Un servo que se alimenta del pin de 5 V de la Pi puede reiniciarla o dañarla.
+> **Alimenta los servos con una fuente externa de 5–6 V** y une su GND con el de la Raspberry (o del Arduino). Un servo que se alimenta del pin de 5 V de la Pi puede reiniciarla o dañarla.
 
-- **Directo a GPIO (`gpiozero`)**: sin `pigpio` el pulso se genera por software y varía cuando la CPU está ocupada con la IA y el video: los servos tiemblan o se mueven solos. Al arrancar, Asgard lo avisa en el registro. Sirve para pruebas; para el aula usa un ESP32 o un PCA9685.
+- **Directo a GPIO (`gpiozero`)**: sin `pigpio` el pulso se genera por software y varía cuando la CPU está ocupada con la IA y el video: los servos tiemblan o se mueven solos. Al arrancar, Asgard lo avisa en el registro. Sirve para pruebas; para el aula usa un Arduino Uno o un PCA9685.
 - **Raspberry Pi 5**: no admite `pigpio`. **Raspberry Pi 4 o anterior**: con `--pigpio` el GPIO directo usa PWM por hardware.
 - **PCA9685**: activa I2C con `sudo raspi-config` → *Interface Options* → *I2C*.
 
-### Conexión con ESP32 (recomendada)
+### Conexión con Arduino Uno (recomendada)
 
-El ESP32 genera los pulsos de los tres servos con PWM por hardware y recibe las posiciones de la Raspberry por USB. El firmware y cómo cargarlo están en [Asgard/Firmware](../Firmware/README.es.md). Configuración: `./install.sh --servos esp32`, o en `asgard.ini` `[servos] driver = esp32` (la mano usa el mismo ESP32, canal 2).
+Un Arduino Uno genera los pulsos de los tres servos con los temporizadores por hardware de su ATmega328P y recibe las posiciones de la Raspberry por USB (un puerto serie a 115200 baudios: unos 1,4 ms por posición). Es barato, sus señales son de 5 V como esperan los servos y el cable USB también lo alimenta. El firmware y cómo cargarlo (desde una PC o desde la propia Raspberry) están en [Asgard/Firmware](../Firmware/README.es.md). Configuración: `./install.sh --servos arduino`, o en `asgard.ini` `[servos] driver = arduino` (la mano usa el mismo Arduino, canal 2). También sirven un Arduino Nano o un ESP32 con el mismo firmware (`driver = esp32`).
 
 ```
  Fuente 5–6 V (≥ 1 A por servo) ─┬───────────────────── + rojo de los 3 servos
                                  = 1000 µF + 100 nF
  GND de la fuente ───────────────●───────────────────── − café/negro de los 3 servos
                                  │  punto único de tierra, junto a los servos
-                                 └───────────────────── GND del ESP32
- ESP32 GPIO 25 ──[ 330 Ω ]──┬─────────────────────────── señal pan (naranja)
-                            └─[ 10 kΩ ]─ GND
- ESP32 GPIO 26 ──[ 330 Ω ]── … señal tilt     ESP32 GPIO 27 ──[ 330 Ω ]── … señal mano
- ESP32 USB ───────────────────────────────────────────── USB de la Raspberry (datos y 5 V del ESP32)
+                                 └───────────────────── GND del Arduino
+ Arduino D9  ──[ 330 Ω ]──┬──────────────────────────── señal pan (naranja)
+                          └─[ 10 kΩ ]─ GND
+ Arduino D10 ──[ 330 Ω ]── … señal tilt       Arduino D3 ──[ 330 Ω ]── … señal mano
+ Arduino USB ─────────────────────────────────────────── USB de la Raspberry (datos y 5 V del Arduino)
 ```
 
-- **Corriente de los servos.** Debe volver a la fuente por sus propios cables, cortos y gruesos (22 AWG o más). No debe pasar por el ESP32, la Raspberry, el cable USB ni las pistas de una protoboard. Si pasa, cada movimiento hace «rebotar» la tierra de la lógica, y en el osciloscopio parece ruido de la Raspberry.
-- **Alimentación del ESP32.** Aliméntalo por el USB de la Raspberry. Si toma energía de la fuente de los servos, cada arranque de motor le baja el voltaje y se reinicia: Asgard lo registra como «caída de voltaje (brownout)». No conectes el +5 V de la fuente al pin 5V/VIN mientras el USB esté conectado.
+- **Corriente de los servos.** Debe volver a la fuente por sus propios cables, cortos y gruesos (22 AWG o más). No debe pasar por el Arduino, la Raspberry, el cable USB ni las pistas de una protoboard. Si pasa, cada movimiento hace «rebotar» la tierra de la lógica, y en el osciloscopio parece ruido de la Raspberry.
+- **Alimentación del Arduino.** Aliméntalo por el USB de la Raspberry y nunca alimentes los servos desde su pin 5V (el USB da 500 mA como máximo). Si toma energía de la fuente de los servos, cada arranque de motor le baja el voltaje y se reinicia: Asgard registra «La placa de servos se reinició». No conectes el +5 V de la fuente al pin 5V/VIN mientras el USB esté conectado.
 - **Capacitor.** Pon de 470 a 1000 µF (10 V o más) en los bornes de los servos, más uno cerámico de 100 nF. Absorbe los picos de arranque (cada servo de 1,8 kg·cm pide hasta 0,7–1 A al arrancar o bloquearse).
-- **Resistencias de la señal.** La de 330 Ω en serie amortigua el rebote del cable. La de 10 kΩ a GND mantiene la señal en bajo mientras el ESP32 arranca.
-- **Nivel de 3,3 V.** Los servos SG90 y MG90S lo aceptan. Si con 6 V alguno no responde bien, aliméntalos a 5 V o usa un adaptador de nivel (74AHCT125).
+- **Resistencias de la señal.** La de 330 Ω en serie amortigua el rebote del cable. La de 10 kΩ a GND mantiene la señal en bajo mientras el Arduino arranca (sus pines son entradas hasta que empieza el firmware).
+- **Arranque.** Al abrir el puerto USB el Uno se reinicia: cuando Asgard arranca, los servos quedan sueltos unos 2 segundos. Es normal.
+- **Sin cable USB.** El Arduino también se puede conectar a la UART de la Raspberry (`serial_port = /dev/serial0`, con un divisor en su TX); ver [Asgard/Firmware](../Firmware/README.es.md#directo-a-la-uart-de-la-raspberry-alternativa).
 - **Topes mecánicos.** No dejes un servo empujando contra su tope: consume la corriente máxima y calienta. Ajusta `pan_min`/`pan_max`/`tilt_min`/`tilt_max` y, si hace falta, `min_pulse_us`/`max_pulse_us`.
 
 #### Comprobar con el osciloscopio
@@ -108,7 +109,7 @@ El instalador instala los paquetes del sistema y crea `.venv`. El entorno ve los
 | `--server HOST[:PUERTO]` | Dirección de Bifröst, o `auto` para buscarlo en la red local. |
 | `--tls`, `--fingerprint HUELLA` | Conexión cifrada (Bifröst en modo público); `--fingerprint` implica `--tls`. |
 | `--camera 0\|picamera2` | Cámara USB por índice, o CSI. |
-| `--servos gpiozero\|pca9685\|esp32\|sim` | Controlador de los servos (`esp32` instala pyserial y agrega tu usuario al grupo `dialout`). |
+| `--servos gpiozero\|pca9685\|arduino\|esp32\|sim` | Controlador de los servos (`arduino` y `esp32` instalan pyserial y agregan tu usuario al grupo `dialout`). |
 | `--hand servo\|gpio\|sim\|none` | Tipo de actuador de la mano. |
 | `--model lite\|full\|heavy` | Modelo de IA. |
 | `--start desktop\|service\|none` | Con monitor: ventana a pantalla completa al iniciar sesión (predeterminado con escritorio). Sin monitor: servicio del usuario que arranca con el equipo. |
@@ -210,10 +211,10 @@ La simulación usa una cámara virtual con dos personas que caminan y responde a
 | La pantalla dice «No conectado a Bifröst» y el registro «Identificador o secreto de Asgard inválido» | Revisa `device` y `secret`, o genera otro con `bifrost asgard secret <id>`. |
 | «El certificado TLS del servidor no es de confianza» | Copia en `tls_fingerprint` la huella que muestra `bifrost fingerprint`. |
 | Un eje se mueve al revés | `invert_pan = yes` o `invert_tilt = yes` (o desde Midgard, en Seguimiento). |
-| Los servos tiemblan o se mueven solos | Si `--test-servos` dice «PWM por software», usa un ESP32 (`driver = esp32`) o un PCA9685. Revisa el cableado y la tierra en [Conexión con ESP32](#conexión-con-esp32-recomendada); `release_when_idle = yes`. |
-| «El ESP32 de los servos se reinició: caída de voltaje (brownout)…» | El ESP32 se queda sin voltaje cuando arrancan los motores. Aliméntalo por el USB de la Raspberry, agrega el capacitor y usa una fuente de al menos 1 A por servo. |
-| «No se encontró ningún ESP32 por USB» o «Permission denied: /dev/ttyUSB0» | Usa un cable de datos. Ejecuta `./install.sh --servos esp32` y reinicia (grupo `dialout`). Si hay varios puertos, fija `[servos] serial_port`. |
-| «El ESP32 … no respondió» o «firmware incompatible» | Carga `Asgard/Firmware/asgard_servos` en el ESP32 (ver su README). Asgard 2 usa el protocolo 2 del firmware. |
+| Los servos tiemblan o se mueven solos | Si `--test-servos` dice «PWM por software», usa un Arduino Uno (`driver = arduino`) o un PCA9685. Revisa el cableado y la tierra en [Conexión con Arduino Uno](#conexión-con-arduino-uno-recomendada); `release_when_idle = yes`. |
+| «La placa de servos se reinició…» | La placa se queda sin voltaje cuando arrancan los motores. Aliméntala por el USB de la Raspberry, agrega el capacitor y usa una fuente de al menos 1 A por servo. |
+| «No se encontró ninguna placa de servos (Arduino o ESP32) por USB» o «Permission denied: /dev/ttyACM0» | Usa un cable de datos. Ejecuta `./install.sh --servos arduino` y reinicia (grupo `dialout`). Si hay varios puertos, fija `[servos] serial_port`. |
+| «La placa en … no respondió» o «firmware incompatible» | Carga `Asgard/Firmware/asgard_servos` en el Arduino (ver su README). Asgard 2 usa el protocolo 2 del firmware. |
 | «IA no disponible» | Sistema de 32 bits o sin wheel de MediaPipe para esta versión de Python: usa Raspberry Pi OS de 64 bits. |
 | No hay audio | Usa `--list-audio` y pon el dispositivo en `[audio] input/output`. Si se entrecorta, prueba `latency = high`. |
 | La cámara CSI falla con un error de numpy | Reinstala con `./install.sh` para que fije `numpy<2` en el entorno. |
@@ -222,4 +223,4 @@ La simulación usa una cámara virtual con dos personas que caminan y responde a
 
 ## Desarrollo
 
-Los módulos compartidos (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, la carpeta `fonts/` y `locale/common.es.json`) son copias de `Common/`: edítalos allí y ejecuta `python Common/sync.py`. La pantalla del aula está en `asgard/classroom_screen.py`; `asgard/screen.py` define la versión sin monitor. Los demás módulos: `app.py` (la aplicación), `config.py` (`asgard.ini`), `camera.py`, `tracking.py` (IA y seguimiento), `servos.py`, `esp32.py`, `hand.py` y `simulation.py`. Los textos en español de Asgard están en `asgard/locale/asgard.es.json`.
+Los módulos compartidos (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, la carpeta `fonts/` y `locale/common.es.json`) son copias de `Common/`: edítalos allí y ejecuta `python Common/sync.py`. La pantalla del aula está en `asgard/classroom_screen.py`; `asgard/screen.py` define la versión sin monitor. Los demás módulos: `app.py` (la aplicación), `config.py` (`asgard.ini`), `camera.py`, `tracking.py` (IA y seguimiento), `servos.py`, `servo_board.py` (Arduino o ESP32 por puerto serie), `hand.py` y `simulation.py`. Los textos en español de Asgard están en `asgard/locale/asgard.es.json`.

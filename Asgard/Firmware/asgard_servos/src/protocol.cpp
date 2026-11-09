@@ -1,9 +1,11 @@
 #include "protocol.h"
 
-#include <esp_system.h>
-
+#include "board.h"
 #include "config.h"
 #include "servos.h"
+
+// Los textos van con F(): en el Arduino Uno quedan en la memoria flash y no
+// ocupan los 2 KB de RAM. Solo se usa print() (el Arduino no tiene printf).
 
 namespace protocol {
 
@@ -17,48 +19,61 @@ static char line[MAX_LINE];
 static size_t length = 0;
 static bool overflow = false;
 
-static const char *reset_reason() {
-  switch (esp_reset_reason()) {
-    case ESP_RST_POWERON: return "poweron";
-    case ESP_RST_BROWNOUT: return "brownout";
-    case ESP_RST_SW: return "software";
-    case ESP_RST_PANIC: return "panic";
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT: return "watchdog";
-    case ESP_RST_EXT: return "external";
-    case ESP_RST_DEEPSLEEP: return "deepsleep";
-    default: return "other";
-  }
-}
-
 static void identify(bool at_boot) {
-  port->printf("ASGARD-SERVOS %sproto=%d channels=%u fw=%s chip=%s",
-               at_boot ? "ready " : "", PROTOCOL, CHANNELS, ASGARD_FIRMWARE, ESP.getChipModel());
+  port->print(F("ASGARD-SERVOS "));
   if (at_boot) {
-    port->printf(" reset=%s\n", reset_reason());
-  } else {
-    port->printf(" timeout=%lu\n", (unsigned long)timeout_ms);
+    port->print(F("ready "));
   }
+  port->print(F("proto="));
+  port->print(PROTOCOL);
+  port->print(F(" channels="));
+  port->print(CHANNELS);
+  port->print(F(" fw=" ASGARD_FIRMWARE " chip="));
+  port->print(board::chip());
+  if (at_boot) {
+    port->print(F(" reset="));
+    port->print(board::reset_reason());
+  } else {
+    port->print(F(" timeout="));
+    port->print(timeout_ms);
+  }
+  port->print('\n');
 }
 
 static void show_state() {
-  port->printf("state timeout=%lu", (unsigned long)timeout_ms);
+  port->print(F("state timeout="));
+  port->print(timeout_ms);
   for (uint8_t channel = 0; channel < CHANNELS; channel++) {
-    port->printf(" %u=%u", channel, servos::pulse(channel));
+    port->print(' ');
+    port->print(channel);
+    port->print('=');
+    port->print(servos::pulse(channel));
   }
   port->print('\n');
 }
 
 static void show_help() {
-  port->print("# ?  identity\n");
-  port->print("# S channel us [channel us ...]  pulse in microseconds, 0 = release (e.g. S 0 1500)\n");
-  port->print("# X  releases every servo\n");
-  port->print("# T ms  releases everything when no data arrives within that time (0 = off)\n");
-  port->print("# E  channel state\n");
+  port->print(F("# ?  identity\n"
+                "# S channel us [channel us ...]  pulse in microseconds, 0 = release (e.g. S 0 1500)\n"
+                "# X  releases every servo\n"
+                "# T ms  releases everything when no data arrives within that time (0 = off)\n"
+                "# E  channel state\n"));
   for (uint8_t channel = 0; channel < CHANNELS; channel++) {
-    port->printf("# channel %u = GPIO %u\n", channel, PINS[channel]);
+    port->print(F("# channel "));
+    port->print(channel);
+    port->print(F(" = pin "));
+    port->print(PINS[channel]);
+    port->print('\n');
   }
+}
+
+static void error_with(const __FlashStringHelper *text, const char *detail = nullptr) {
+  port->print(F("err "));
+  port->print(text);
+  if (detail != nullptr) {
+    port->print(detail);
+  }
+  port->print('\n');
 }
 
 static bool read_number(const char *text, long &value) {
@@ -72,49 +87,51 @@ static bool read_number(const char *text, long &value) {
 
 // S canal us [canal us ...]: se valida toda la orden antes de mover algún servo.
 static void command_pulses() {
-  long channels[CHANNELS * 2];
-  long pulses[CHANNELS * 2];
-  size_t count = 0;
+  uint8_t channels[CHANNELS * 2];
+  uint16_t pulses[CHANNELS * 2];
+  uint8_t count = 0;
   const char *text;
   while ((text = strtok(nullptr, " \t")) != nullptr) {
     long channel, us;
     if (!read_number(text, channel) || !read_number(strtok(nullptr, " \t"), us)) {
-      port->print("err S expects pairs: channel microseconds\n");
+      error_with(F("S expects pairs: channel microseconds"));
       return;
     }
     if (channel < 0 || channel >= CHANNELS) {
-      port->printf("err channel %ld does not exist (there are %u)\n", channel, CHANNELS);
+      error_with(F("channel does not exist: "), text);
       return;
     }
     if (us < 0 || us > PULSE_LIMIT_US) {
-      port->printf("err pulse %ld out of range\n", us);
+      error_with(F("pulse out of range"));
       return;
     }
     if (count == CHANNELS * 2) {
-      port->print("err S too many pairs\n");
+      error_with(F("S too many pairs"));
       return;
     }
-    channels[count] = channel;
-    pulses[count] = us;
+    channels[count] = (uint8_t)channel;
+    pulses[count] = (uint16_t)us;
     count++;
   }
   if (count == 0) {
-    port->print("err S without channels\n");
+    error_with(F("S without channels"));
     return;
   }
-  for (size_t i = 0; i < count; i++) {
-    servos::apply((uint8_t)channels[i], (uint16_t)pulses[i]);
+  for (uint8_t i = 0; i < count; i++) {
+    servos::apply(channels[i], pulses[i]);
   }
 }
 
 static void command_timeout() {
   long value;
   if (!read_number(strtok(nullptr, " \t"), value) || value < 0 || value > (long)MAX_TIMEOUT_MS) {
-    port->printf("err T timeout from 0 to %lu ms\n", (unsigned long)MAX_TIMEOUT_MS);
+    error_with(F("T timeout from 0 to 60000 ms"));
     return;
   }
   timeout_ms = (uint32_t)value;
-  port->printf("ok T %lu\n", (unsigned long)timeout_ms);
+  port->print(F("ok T "));
+  port->print(timeout_ms);
+  port->print('\n');
 }
 
 static void process(char *text) {
@@ -123,7 +140,7 @@ static void process(char *text) {
     return;
   }
   if (command[1] != '\0') {
-    port->printf("err unknown command: %s (H = help)\n", command);
+    error_with(F("unknown command (H = help): "), command);
     return;
   }
   switch (toupper(command[0])) {
@@ -135,7 +152,7 @@ static void process(char *text) {
       break;
     case 'X':
       servos::release_all();
-      port->print("ok X\n");
+      port->print(F("ok X\n"));
       break;
     case 'T':
       command_timeout();
@@ -149,7 +166,7 @@ static void process(char *text) {
       show_help();
       break;
     default:
-      port->printf("err unknown command: %s (H = help)\n", command);
+      error_with(F("unknown command (H = help): "), command);
   }
 }
 
@@ -164,7 +181,7 @@ void serve() {
     char c = (char)port->read();
     if (c == '\n' || c == '\r') {
       if (overflow) {
-        port->print("err line too long\n");
+        error_with(F("line too long"));
       } else if (length > 0) {
         line[length] = '\0';
         last_data_ms = millis();
@@ -182,7 +199,7 @@ void serve() {
   if (timeout_ms != 0 && !released_by_timeout && millis() - last_data_ms > timeout_ms) {
     servos::release_all();
     released_by_timeout = true;
-    port->print("warn no data from the Raspberry Pi: servos released\n");
+    port->print(F("warn no data from the Raspberry Pi: servos released\n"));
   }
 }
 

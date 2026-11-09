@@ -243,17 +243,18 @@ def validate(config: AsgardConfig) -> None:
     require(a.transport in ("auto", "tcp"), tr("[audio] transport must be auto or tcp."))
     require(a.latency in ("low", "high"), tr("[audio] latency must be low or high."))
     s = config.servos
-    require(s.driver in ("gpiozero", "pca9685", "esp32", "sim"), tr("[servos] driver: gpiozero, pca9685, esp32 or sim."))
+    require(s.driver in ("gpiozero", "pca9685", "arduino", "esp32", "sim"),
+            tr("[servos] driver: gpiozero, pca9685, arduino, esp32 or sim."))
     require(0 <= s.pan_channel <= 15 and 0 <= s.tilt_channel <= 15 and s.pan_channel != s.tilt_channel,
             tr("[servos] pan_channel and tilt_channel must be different and between 0 and 15."))
-    require(bool(s.serial_port), tr("[servos] serial_port: 'auto' or the ESP32's port (for example /dev/ttyUSB0)."))
+    require(bool(s.serial_port), tr("[servos] serial_port: 'auto' or the board's port (for example /dev/ttyACM0 or /dev/serial0)."))
     require(0 <= s.pan_min < s.pan_max <= 180, tr("[servos] invalid pan_min/pan_max."))
     require(0 <= s.tilt_min < s.tilt_max <= 180, tr("[servos] invalid tilt_min/tilt_max."))
     require(5 <= s.speed <= 400, tr("[servos] max_speed must be between 5 and 400 °/s."))
     h = config.hand
     require(h.kind in ("servo", "gpio", "sim", "none"), tr("[hand] type: servo, gpio, sim or none."))
-    require(h.driver in ("", "gpiozero", "pca9685", "esp32", "sim"),
-            tr("[hand] driver: gpiozero, pca9685, esp32, sim or empty."))
+    require(h.driver in ("", "gpiozero", "pca9685", "arduino", "esp32", "sim"),
+            tr("[hand] driver: gpiozero, pca9685, arduino, esp32, sim or empty."))
     require(h.auto_lower_s >= 0, tr("[hand] auto_lower_s cannot be negative."))
     i = config.ai
     require(1 <= i.max_people <= 10, tr("[ai] max_people must be between 1 and 10."))

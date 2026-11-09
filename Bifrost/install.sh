@@ -3,13 +3,15 @@
 # Bifröst installer (Linux server: Debian, Ubuntu, Raspberry Pi OS...)
 #
 #   sudo ./install.sh --mode local
+#   sudo ./install.sh --mode local --web-tls        # Midgard Web with microphone and camera
 #   sudo ./install.sh --mode public --public-name bifrost.mydomain.com --open-firewall
 #   sudo ./install.sh --mode public --cert /etc/letsencrypt/live/x/fullchain.pem \
 #                     --key /etc/letsencrypt/live/x/privkey.pem
 #   ./install.sh --env-only        # without sudo: only prepares .venv for testing
 #
-# Installs the program in /opt/bifrost, the data in /var/lib/bifrost, the
-# "bifrost" systemd service and the "bifrost" administration command.
+# Installs the program in /opt/bifrost (with Midgard Web, served on the web
+# port), the data in /var/lib/bifrost, the "bifrost" systemd service and the
+# "bifrost" administration command.
 # =============================================================================
 set -euo pipefail
 
@@ -17,6 +19,9 @@ MODE="local"
 PORT=8765
 AUDIO_PORT=5004
 DISCOVERY_PORT=8767
+WEB_PORT=8080
+WEB=1
+WEB_TLS=0
 PUBLIC_NAME=""
 CERT=""
 KEY=""
@@ -39,13 +44,17 @@ es_mode() {
 t() { if es_mode; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 
 usage() {
-    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     if es_mode; then
         cat <<'TXT'
 Opciones:
   --mode local|public       modo del servidor (por defecto: local)
   --port N                  puerto TCP de control y video (8765)
   --audio-port N            puerto UDP de audio (5004)
+  --web-port N              puerto de Midgard Web y de las apps móviles (8080)
+  --web-tls                 HTTPS en el puerto web también en modo local (el navegador
+                            solo permite micrófono y cámara en páginas HTTPS)
+  --no-web                  no instala Midgard Web ni abre el puerto web
   --public-name NOMBRES     dominio(s)/IP para el certificado autofirmado (separados por comas)
   --cert RUTA --key RUTA    certificado propio (por ejemplo, Let's Encrypt)
   --name TEXTO              nombre del servidor que ven los clientes
@@ -61,6 +70,10 @@ Options:
   --mode local|public       server mode (default: local)
   --port N                  TCP port for control and video (8765)
   --audio-port N            UDP audio port (5004)
+  --web-port N              port of Midgard Web and the mobile apps (8080)
+  --web-tls                 HTTPS on the web port in local mode too (browsers only
+                            allow the microphone and the camera on HTTPS pages)
+  --no-web                  does not install Midgard Web or open the web port
   --public-name NAMES       domain(s)/IP for the self-signed certificate (comma separated)
   --cert PATH --key PATH    own certificate (for example, Let's Encrypt)
   --name TEXT               server name the clients see
@@ -82,6 +95,9 @@ while [ $# -gt 0 ]; do
         --mode) MODE="${2:-}"; shift 2 ;;
         --port) PORT="${2:-}"; shift 2 ;;
         --audio-port) AUDIO_PORT="${2:-}"; shift 2 ;;
+        --web-port) WEB_PORT="${2:-}"; shift 2 ;;
+        --web-tls) WEB_TLS=1; shift ;;
+        --no-web) WEB=0; shift ;;
         --public-name) PUBLIC_NAME="${2:-}"; shift 2 ;;
         --cert) CERT="${2:-}"; shift 2 ;;
         --key) KEY="${2:-}"; shift 2 ;;
@@ -100,6 +116,11 @@ case "$MODE" in
     local|public) ;;
     *) error "$(t "--mode must be local or public" "--mode debe ser local o public")" ;;
 esac
+for value in "$PORT" "$AUDIO_PORT" "$WEB_PORT"; do
+    case "$value" in
+        ''|*[!0-9]*) error "$(t "Ports must be numbers (got: '$value')." "Los puertos deben ser números (se recibió: '$value').")" ;;
+    esac
+done
 case "$LANGUAGE" in
     ""|auto|en|es) ;;
     *) error "$(t "--language must be auto, en or es" "--language debe ser auto, en o es")" ;;
@@ -158,6 +179,16 @@ for extra in README.md README.es.md uninstall.sh; do
     [ -f "$SOURCE/$extra" ] && cp "$SOURCE/$extra" "$TARGET/"
 done
 [ -f "$TARGET/uninstall.sh" ] && chmod 755 "$TARGET/uninstall.sh"
+rm -rf "$TARGET/web"
+if [ "$WEB" -eq 1 ]; then
+    # Midgard Web (la misma interfaz que la aplicación de escritorio) se sirve desde $TARGET/web.
+    if [ -f "$SOURCE/../Midgard/web/index.html" ]; then
+        cp -r "$SOURCE/../Midgard/web" "$TARGET/web"
+    else
+        warn "$(t "Midgard Web was not found in ../Midgard/web: the web port will only answer 404." \
+                  "No se encontró Midgard Web en ../Midgard/web: el puerto web solo responderá 404.")"
+    fi
+fi
 find "$TARGET" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 info "$(t "Creating the virtual environment and installing dependencies" "Creando el entorno virtual e instalando dependencias")"
@@ -190,6 +221,12 @@ EOF
 chmod 755 /usr/local/bin/bifrost
 
 ARGUMENTS="--mode $MODE --port $PORT --audio-port $AUDIO_PORT --data $DATA"
+if [ "$WEB" -eq 1 ]; then
+    ARGUMENTS="$ARGUMENTS --web-port $WEB_PORT"
+    [ "$WEB_TLS" -eq 1 ] && ARGUMENTS="$ARGUMENTS --web-tls"
+else
+    ARGUMENTS="$ARGUMENTS --no-web"
+fi
 if [ -n "$PUBLIC_NAME" ]; then
     ARGUMENTS="$ARGUMENTS --public-name $PUBLIC_NAME"
 fi
@@ -260,11 +297,13 @@ if [ "$FIREWALL" -eq 1 ]; then
         info "$(t "Opening ports in ufw" "Abriendo puertos en ufw")"
         ufw allow "$PORT/tcp" >/dev/null
         ufw allow "$AUDIO_PORT/udp" >/dev/null
+        [ "$WEB" -eq 1 ] && ufw allow "$WEB_PORT/tcp" >/dev/null
         [ "$MODE" = "local" ] && ufw allow "$DISCOVERY_PORT/udp" >/dev/null
     elif command -v firewall-cmd >/dev/null 2>&1; then
         info "$(t "Opening ports in firewalld" "Abriendo puertos en firewalld")"
         firewall-cmd --permanent --add-port="$PORT/tcp" >/dev/null
         firewall-cmd --permanent --add-port="$AUDIO_PORT/udp" >/dev/null
+        [ "$WEB" -eq 1 ] && firewall-cmd --permanent --add-port="$WEB_PORT/tcp" >/dev/null
         [ "$MODE" = "local" ] && firewall-cmd --permanent --add-port="$DISCOVERY_PORT/udp" >/dev/null
         firewall-cmd --reload >/dev/null
     else
@@ -281,7 +320,20 @@ echo
 info "$(t "Bifröst installed in $MODE mode." "Bifröst instalado en modo $MODE.")"
 DISCOVERY_NOTE=""
 [ "$MODE" = "local" ] && DISCOVERY_NOTE="$(t " (and UDP $DISCOVERY_PORT for the local network search)" " (y UDP $DISCOVERY_PORT para la búsqueda en la red local)")"
-echo "  $(t "Ports to allow" "Puertos a permitir"): TCP $PORT $(t and y) UDP $AUDIO_PORT$DISCOVERY_NOTE"
+WEB_PORTS=""
+[ "$WEB" -eq 1 ] && WEB_PORTS=", $WEB_PORT"
+echo "  $(t "Ports to allow" "Puertos a permitir"): TCP $PORT$WEB_PORTS $(t and y) UDP $AUDIO_PORT$DISCOVERY_NOTE"
+if [ "$WEB" -eq 1 ] && [ -f "$TARGET/web/index.html" ]; then
+    WEB_SCHEME="http"
+    { [ "$MODE" = "public" ] || [ "$WEB_TLS" -eq 1 ]; } && WEB_SCHEME="https"
+    WEB_HOST="${PUBLIC_NAME%%,*}"
+    [ -n "$WEB_HOST" ] || WEB_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    echo "  $(t "Midgard Web (browsers, Android and iOS):" "Midgard Web (navegadores, Android e iOS):") $WEB_SCHEME://${WEB_HOST:-<$(t server servidor)>}:$WEB_PORT"
+    if [ "$WEB_SCHEME" = "http" ]; then
+        echo "    $(t "Without HTTPS the browser does not allow the microphone or the camera: reinstall with --web-tls if you need them." \
+                    "Sin HTTPS el navegador no permite el micrófono ni la cámara: reinstala con --web-tls si los necesitas.")"
+    fi
+fi
 if [ "$MODE" = "public" ] && [ -z "$CERT" ]; then
     echo "  $(t "TLS fingerprint (copy it to Asgard and compare it in Midgard):" "Huella TLS (cópiala en Asgard y compárala en Midgard):")"
     echo "    $(/usr/local/bin/bifrost fingerprint 2>/dev/null || t 'run: bifrost fingerprint' 'ejecuta: bifrost fingerprint')"

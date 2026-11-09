@@ -9,4 +9,4 @@
 | `BIFROST.skp` | Case model (SketchUp) |
 | `BIFROST-parts.zip` | Parts to 3D print: `BIFROST-body.stl` and `BIFROST-lid.stl` |
 
-The wiring of the servos, the power supply and the ESP32 is in the [Asgard guide](../Software/README.md#esp32-wiring-recommended) and the firmware in [Firmware](../Firmware/README.md).
+The wiring of the servos, the power supply and the Arduino Uno is in the [Asgard guide](../Software/README.md#arduino-uno-wiring-recommended) and the firmware in [Firmware](../Firmware/README.md).

@@ -14,6 +14,8 @@ Midgard is the remote user's application. With it you:
 
 The interface follows the «UI-Asgard» design template (dark theme, Inter typeface, logo and runes), adapts to any window size and animates its transitions. It is built with Qt (PySide6) and it is in **English and Spanish**.
 
+The same interface also exists **without installing anything**, as **Midgard Web** (in the browser, served by Bifröst: [web/README.md](web/README.md)), and as **Android and iOS apps** ([mobile/README.md](mobile/README.md)).
+
 ## Language
 
 By default Midgard uses the system language. To change it:
@@ -71,7 +73,7 @@ Midgard picks the server like this, in this order:
    bifrost client --server bifrost.mydomain.com --tls --output server.json   # (or python main.py client ...)
    ```
 
-   Copy it into this folder (`Midgard/`) before installing or building the executable. Midgard looks for it next to the program (or next to `Midgard.exe`) and in the user's settings folder. The installers also create it with `-Server`/`--server`. Its contents are `{"server", "port", "tls", "fingerprint", "name"}`.
+   Copy it into this folder (`Midgard/`) before installing or building the executable. Midgard looks for it next to the program (or next to `Midgard.exe`) and in the user's settings folder. The installers also create it with `-Server`/`--server`. Its contents are `{"server", "port", "tls", "fingerprint", "name"}`, plus `web_port` and `web_tls` for the mobile apps.
 3. **Local network**: when Bifröst is in local mode on the same network, it is found by itself.
 4. **The last server that worked.**
 
@@ -118,6 +120,27 @@ Install Python 3.12 from [python.org](https://www.python.org/downloads/) and run
 ```
 
 It builds `dist/Midgard/` (Windows: `Midgard.exe` with the system icon; macOS: `Midgard.app`), with the typefaces and the language catalogs included and, when it exists, `server.json` inside and next to the executable. Copy the whole folder to other computers with the same operating system: the executable is built on the system where it will be used. To check it without opening the window: `Midgard.exe --check` (the result goes to `midgard.log`).
+
+## Uninstalling
+
+| Installation | How to uninstall |
+| --- | --- |
+| Windows (`install_windows.bat`) | Double-click **`uninstall_windows.bat`**, or *Settings → Apps → Midgard → Uninstall*. |
+| Linux and macOS (`install_linux_mac.sh`) | `./uninstall_linux_mac.sh` |
+| Standalone executable | Run the uninstaller that comes inside the folder (`dist/Midgard`; on macOS, next to `Midgard.app`): it removes the whole folder. |
+
+It removes `.venv`, the launcher, the icon, the shortcuts and the menu or *Apps* entry (only those that open that copy of Midgard), and asks whether to also delete your settings (profile photos, trusted fingerprints, devices and log). It also cleans what Midgard 1.x left (`iniciar_midgard.bat`, `ajustes.json`, `fotos/`). When Midgard is open it offers to close it first. The program folder is kept (with its `server.json`) unless `-RemoveFolder` / `--remove-folder` is given, and it is never deleted when it is part of a git repository.
+
+| Windows | Linux / macOS | Effect |
+| --- | --- | --- |
+| `-Purge` | `--purge` | Also deletes your settings, without asking. |
+| `-KeepSettings` | `--keep-settings` | Keeps your settings, without asking. |
+| `-RemoveFolder` | `--remove-folder` | Also deletes the program folder. |
+| `-Yes` | `--yes` | Asks nothing (keeps the settings unless `-Purge` / `--purge` is given). |
+| `-DryRun` | `--dry-run` | Shows what it would do without changing anything. |
+| `-Language auto\|en\|es` | `--language auto\|en\|es` | Language of the messages. |
+
+Python and the system libraries are left installed; other programs may use them.
 
 ## Command-line options
 
@@ -172,6 +195,7 @@ When the network drops, Midgard reconnects, recovers your user session without a
 | File | Contents |
 | --- | --- |
 | `main.py` | Start-up, command-line options, language and installation check. |
+| `uninstall_windows.bat` / `.ps1`, `uninstall_linux_mac.sh` | Uninstallers (also copied into the standalone executable). |
 | `midgard/session.py` | Controller without interface: connection, sign-in, list, call, audio, camera and screen senders. |
 | `midgard/connection.py` | Default server (manual, `server.json`, local network, last one). |
 | `midgard/settings.py` | Remembered settings (`settings.json`). |
@@ -180,7 +204,10 @@ When the network drops, Midgard reconnects, recovers your user session without a
 | `midgard/resources.py` | Application icon and `server.json` for the installers. |
 | `midgard/locale/` | Spanish translations (`midgard.es.json` and `common.es.json`). |
 | `midgard/qt.py`, `theme.py`, `icons.py`, `widgets.py`, `fonts/` | Visual kit shared with Asgard (copies from `Common/`). |
+| `web/` | Midgard Web: the same interface in HTML, CSS and JavaScript (no build step), served by Bifröst. |
+| `build_web.py` | Generates the shared files of `web/` (colors, logo, icons, fonts and translations) from `Common/` and `midgard/locale/`. |
+| `mobile/` | Android and iOS apps (Midgard Web with Capacitor) and their build script. |
 
-The shared modules (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, the `fonts/` folder and `locale/common.es.json`) are copies from `Common/`: edit them there and run `python Common/sync.py`.
+The shared modules (`protocol.py`, `client_link.py`, `i18n.py`, `audio.py`, `imaging.py`, `qt.py`, `theme.py`, `icons.py`, `widgets.py`, the `fonts/` folder and `locale/common.es.json`) are copies from `Common/`: edit them there and run `python Common/sync.py`, which also regenerates the shared files of Midgard Web.
 
 Inter and JetBrains Mono typefaces (SIL OFL 1.1) and Lucide icons (ISC): licenses in `midgard/fonts/LICENSES.txt`.

@@ -4,7 +4,7 @@
 Types (``[hand]`` section of ``asgard.ini``):
 
 * ``servo``: a servo moves the arm between ``rest_angle`` and ``raised_angle``
-  (GPIO with gpiozero, a PCA9685 channel or an ESP32 channel).
+  (GPIO with gpiozero, a PCA9685 channel or a channel of the Arduino or ESP32 servo board).
 * ``gpio``: a digital output drives a relay, solenoid or LED.
 * ``sim``: simulation (only records the change).
 * ``none``: Asgard has no hand.
@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 from .i18n import tr
+from .servo_board import DRIVERS as SERVO_BOARD_DRIVERS
 from .servos import clamp, get_pin_factory, get_servokit, pulse_us
 
 log = logging.getLogger(__name__)
@@ -104,11 +105,11 @@ class PcaServoHand(_ServoHandBase):
         self.kit.servo[self.channel].angle = angle
 
 
-class Esp32ServoHand(_ServoHandBase):
+class BoardServoHand(_ServoHandBase):
     def __init__(self, port: str, channel: int, rest_angle: float, raised_angle: float,
                  min_pulse_us: int, max_pulse_us: int) -> None:
         super().__init__(rest_angle, raised_angle)
-        from .esp32 import acquire_link, release_link
+        from .servo_board import acquire_link, release_link
 
         self.link = acquire_link(port)
         try:
@@ -118,7 +119,8 @@ class Esp32ServoHand(_ServoHandBase):
             raise
         self.channel = channel
         self.pulse_range = (min_pulse_us, max_pulse_us)
-        self.name = tr("servo ESP32 {port} channel {channel}", port=self.link.port, channel=channel)
+        self.name = tr("servo on {board} {port}, channel {channel}", board=self.link.board, port=self.link.port,
+                       channel=channel)
         self._closed = False
 
     def _write(self, angle: float | None) -> None:
@@ -128,7 +130,7 @@ class Esp32ServoHand(_ServoHandBase):
         if self._closed:
             return
         self._closed = True
-        from .esp32 import release_link
+        from .servo_board import release_link
 
         super().close()
         release_link(self.link)
@@ -165,8 +167,8 @@ def make_hand_backend(config: Any, servo_config: Any, simulate: bool = False) ->
     try:
         if config.kind == "gpio":
             return GpioOutputHand(config.pin, config.active_high)
-        if driver == "esp32":
-            return Esp32ServoHand(servo_config.serial_port, config.channel, config.rest_angle, config.raised_angle,
+        if driver in SERVO_BOARD_DRIVERS:
+            return BoardServoHand(servo_config.serial_port, config.channel, config.rest_angle, config.raised_angle,
                                   servo_config.min_pulse_us, servo_config.max_pulse_us)
         if driver == "pca9685":
             return PcaServoHand(config.channel, config.rest_angle, config.raised_angle,

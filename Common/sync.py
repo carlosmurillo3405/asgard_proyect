@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Copies the shared modules from ``Common/`` to Asgard, Midgard and Bifröst.
 
+It also regenerates Midgard Web's shared files (``Midgard/build_web.py``):
+design, icons, fonts and translations, from the same sources.
+
 Usage (from the repository root)::
 
     python Common/sync.py           # copies the files
@@ -60,6 +63,14 @@ def outdated() -> list[tuple[Path, Path]]:
     ]
 
 
+def web_files(check: bool) -> list[str]:
+    """Midgard Web's files out of date (written unless ``check``), as paths from the root."""
+    sys.path.insert(0, str(ROOT / "Midgard"))
+    import build_web
+
+    return [f"Midgard/web/{name}" for name in build_web.update(check)]
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -73,9 +84,10 @@ def main(argv: list[str] | None = None) -> int:
 
     pending = outdated()
     if args.check:
-        for _, copy in pending:
-            print(tr("Outdated: {path}", path=copy.relative_to(ROOT)))
-        if pending:
+        stale = [str(copy.relative_to(ROOT)) for _, copy in pending] + web_files(check=True)
+        for path in stale:
+            print(tr("Outdated: {path}", path=path))
+        if stale:
             print(tr("Run: python Common/sync.py"))
             return 1
         print(tr("Every copy of Common/ is up to date."))
@@ -85,7 +97,11 @@ def main(argv: list[str] | None = None) -> int:
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, copy)
         print(tr("Copied {name} -> {path}", name=source.name, path=copy.relative_to(ROOT)))
-    if not pending:
+    # Después de copiar: la web toma los catálogos y las tipografías ya actualizados.
+    web = web_files(check=False)
+    for path in web:
+        print(tr("Updated: {path}", path=path))
+    if not pending and not web:
         print(tr("Nothing to copy: everything is up to date."))
     return 0
 

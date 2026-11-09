@@ -1,0 +1,20 @@
+{
+  "Address of Bifröst and its web port (8080 by default). On the server, «python main.py» shows it as «Midgard Web».": "Dirección de Bifröst y su puerto web (8080 por omisión). En el servidor, «python main.py» la muestra como «Midgard Web».",
+  "Goes back to the server of this page or to server.json": "Vuelve al servidor de esta página o al de server.json",
+  "Mobile app · v{version}": "App móvil · v{version}",
+  "Screen sharing stopped.": "Se dejó de compartir la pantalla.",
+  "Speaker": "Altavoz",
+  "The Bifröst server is not configured. Enter its address in «Connection settings».": "El servidor Bifröst no está configurado. Escribe su dirección en «Configurar conexión».",
+  "The camera could not be opened: {error}": "No se pudo abrir la cámara: {error}",
+  "The camera is only available on HTTPS pages.": "La cámara solo está disponible en páginas HTTPS.",
+  "The camera stopped delivering images.": "La cámara dejó de entregar imágenes.",
+  "The connection with the server was lost.": "Se perdió la conexión con el servidor.",
+  "The microphone could not be opened: {error}": "No se pudo abrir el micrófono: {error}",
+  "The microphone is only available on HTTPS pages.": "El micrófono solo está disponible en páginas HTTPS.",
+  "The speaker could not be changed: {error}": "No se pudo cambiar el altavoz: {error}",
+  "This browser cannot play the call's audio.": "Este navegador no puede reproducir el audio de la llamada.",
+  "This browser cannot share the screen.": "Este navegador no puede compartir la pantalla.",
+  "This page is not on HTTPS: the browser does not allow the microphone or the camera.": "Esta página no usa HTTPS: el navegador no permite el micrófono ni la cámara.",
+  "Web client · v{version}": "Cliente web · v{version}",
+  "this page's server": "servidor de esta página"
+}

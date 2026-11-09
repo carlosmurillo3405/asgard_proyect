@@ -2,7 +2,8 @@
 """Pan/tilt servomotors of the Asgard camera.
 
 Drivers: gpiozero (direct GPIO, with pigpio when available), PCA9685 over I2C
-or an ESP32 over USB (``esp32.py``), plus a thread that moves the servos
+or a board on the serial port, an Arduino Uno or an ESP32 (``servo_board.py``), plus a
+thread that moves the servos
 towards the target at a limited speed to avoid jerks.
 
 Convention: increasing pan = the camera turns right; increasing tilt = the
@@ -17,6 +18,7 @@ import time
 from typing import Any
 
 from .i18n import tr
+from .servo_board import DRIVERS as SERVO_BOARD_DRIVERS
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +110,7 @@ class GpioZeroBackend:
         self.tilt = AngularServo(tilt_pin, initial_angle=initial[1], **options)
         if self.software_pwm:
             log.warning(tr("The servos use software PWM (%s): the pulse varies when the CPU is busy and the "
-                           "servos jitter or move by themselves. Use an ESP32 (driver = esp32), a PCA9685 "
+                           "servos jitter or move by themselves. Use an Arduino Uno (driver = arduino), a PCA9685 "
                            "or pigpio on a Raspberry Pi 4."), self.name)
 
     def write(self, pan: float, tilt: float) -> None:
@@ -148,14 +150,14 @@ class PCA9685Backend:
         self.detach()
 
 
-class Esp32Backend:
-    """Pan and tilt on two channels of the ESP32 (asgard_servos firmware)."""
+class ServoBoardBackend:
+    """Pan and tilt on two channels of the servo board (Arduino or ESP32 with the asgard_servos firmware)."""
 
     simulated = False
     software_pwm = False
 
     def __init__(self, port: str, pan_channel: int, tilt_channel: int, min_pulse_us: int, max_pulse_us: int) -> None:
-        from .esp32 import acquire_link, release_link
+        from .servo_board import acquire_link, release_link
 
         self.link = acquire_link(port)
         try:
@@ -184,7 +186,7 @@ class Esp32Backend:
         if self._closed:
             return
         self._closed = True
-        from .esp32 import release_link
+        from .servo_board import release_link
 
         self.detach()
         release_link(self.link)
@@ -197,8 +199,8 @@ def make_servo_backend(config: Any, simulate: bool = False) -> Any:
     try:
         if config.driver == "pca9685":
             return PCA9685Backend(config.pan_channel, config.tilt_channel, config.min_pulse_us, config.max_pulse_us)
-        if config.driver == "esp32":
-            return Esp32Backend(config.serial_port, config.pan_channel, config.tilt_channel,
+        if config.driver in SERVO_BOARD_DRIVERS:
+            return ServoBoardBackend(config.serial_port, config.pan_channel, config.tilt_channel,
                                 config.min_pulse_us, config.max_pulse_us)
         return GpioZeroBackend(
             config.pan_pin, config.tilt_pin, config.min_pulse_us, config.max_pulse_us,

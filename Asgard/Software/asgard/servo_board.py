@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Asgard servos driven by an ESP32 connected over USB.
+"""Asgard servos driven by a board on the serial port: an Arduino Uno (recommended) or an ESP32.
 
-The ESP32 generates the pulses with its hardware PWM (LEDC). That way the
-servos do not jitter or move by themselves while the Raspberry Pi is busy with
-the AI and the video, which is what happens with gpiozero's software PWM. The
-firmware is the PlatformIO project ``Asgard/Firmware/asgard_servos``.
+The board generates the pulses with its hardware PWM (the ATmega328P timers or
+the ESP32's LEDC). That way the servos do not jitter or move by themselves
+while the Raspberry Pi is busy with the AI and the video, which is what happens
+with gpiozero's software PWM. The firmware is the PlatformIO project
+``Asgard/Firmware/asgard_servos``.
+
+The board is connected over USB (``/dev/ttyACM0`` on a genuine Uno,
+``/dev/ttyUSB0`` on clones with a CH340) or straight to the Raspberry Pi's
+UART (``serial_port = /dev/serial0``, with a level shifter).
 
 Protocol 2 (text at 115200 baud, one command per line):
 
@@ -14,9 +19,11 @@ Protocol 2 (text at 115200 baud, one command per line):
     T ms                       watchdog: release everything when nothing arrives within that time
     K                          keep-alive (no answer)
 
-At boot the ESP32 writes «ASGARD-SERVOS ready … reset=<reason>». When that
-arrives in the middle of a session, the ESP32 restarted (almost always because
-of a voltage drop): the reason is logged and the positions are sent again.
+At boot the board writes «ASGARD-SERVOS ready … reset=<reason>». When that
+arrives in the middle of a session, the board restarted (almost always because
+of a voltage drop): it is logged and the positions are sent again. An Arduino
+Uno restarts every time the port is opened over USB; that first restart is
+expected and waited for.
 """
 
 from __future__ import annotations
@@ -32,30 +39,35 @@ log = logging.getLogger(__name__)
 
 PROTOCOL = 2
 BAUD = 115200
-WATCHDOG_MS = 1500        # el ESP32 suelta los servos si la Raspberry calla este tiempo
-HANDSHAKE_S = 5.0
+WATCHDOG_MS = 1500        # la placa suelta los servos si la Raspberry calla este tiempo
+HANDSHAKE_S = 5.0         # el Uno tarda ~2 s en arrancar tras abrir el puerto (cargador Optiboot)
 RETRY_S = 2.0
 
-# Convertidores USB-serie habituales en placas ESP32, y el USB nativo de Espressif.
+# Valores de [servos] driver que usan esta placa.
+DRIVERS = ("arduino", "esp32")
+
+# Fabricantes de los adaptadores USB-serie habituales en estas placas.
 USB_VENDORS = {
-    0x10C4: "Silicon Labs CP210x",
+    0x2341: "Arduino",
+    0x2A03: "Arduino",
     0x1A86: "WCH CH340/CH9102",
     0x0403: "FTDI",
+    0x10C4: "Silicon Labs CP210x",
     0x303A: "Espressif (native USB)",
 }
 
 # Motivo de reinicio que informa el firmware -> texto (se traduce con tr() al mostrarlo).
 RESET_REASONS = {
     "poweron": "power-on",
-    "external": "EN button or a reset from USB",
+    "external": "reset button or a reset from USB",
     "software": "software reset",
-    "brownout": ("voltage drop (brownout). If the ESP32 takes power from the servo supply, "
+    "brownout": ("voltage drop (brownout). If the board takes power from the servo supply, "
                  "power it from the Raspberry Pi's USB; also check that the supply gives at least 1 A per servo"),
     "panic": "firmware error",
-    "watchdog": "the ESP32 watchdog timer (firmware stuck)",
+    "watchdog": "the board's watchdog timer (firmware stuck)",
     "deepsleep": "wake from deep sleep",
 }
-_NORMAL_BOOT = {"poweron", "external", "software"}
+_NORMAL_BOOT = {"poweron", "external", "software", "unknown", "other"}
 
 
 def _pyserial() -> Any:
@@ -63,13 +75,13 @@ def _pyserial() -> Any:
         import serial
         import serial.tools.list_ports
     except ImportError:
-        raise RuntimeError(tr("pyserial is missing: run ./install.sh --servos esp32 "
-                              "(or .venv/bin/pip install -r requirements-esp32.txt)")) from None
+        raise RuntimeError(tr("pyserial is missing: run ./install.sh --servos arduino "
+                              "(or .venv/bin/pip install -r requirements-serial.txt)")) from None
     return serial
 
 
 def serial_candidates() -> list[tuple[str, str]]:
-    """Serial ports that look like an ESP32 board: [(device, description)]."""
+    """USB serial ports that look like an Arduino or ESP32 board: [(device, description)]."""
     list_ports = _pyserial().tools.list_ports
 
     found = []
@@ -82,7 +94,7 @@ def serial_candidates() -> list[tuple[str, str]]:
 def describe_ports() -> str:
     candidates = serial_candidates()
     if not candidates:
-        return tr("no ESP32 connected over USB")
+        return tr("no servo board (Arduino or ESP32) connected over USB")
     return "; ".join(f"{device} ({description})" for device, description in candidates)
 
 
@@ -91,7 +103,8 @@ def find_port(port: str) -> str:
         return port
     candidates = serial_candidates()
     if not candidates:
-        raise RuntimeError(tr("no ESP32 was found over USB (check that the cable carries data and not only power)"))
+        raise RuntimeError(tr("no servo board (Arduino or ESP32) was found over USB "
+                              "(check that the cable carries data and not only power)"))
     if len(candidates) > 1:
         log.warning(tr("There are several serial ports (%s); using %s. Set it with [servos] serial_port."),
                     ", ".join(device for device, _ in candidates), candidates[0][0])
@@ -117,15 +130,16 @@ def open_serial(port: str, baud: int) -> Any:
     connection.baudrate = baud
     connection.timeout = 0.1
     connection.write_timeout = 0.5
-    # Con DTR y RTS en reposo, abrir el puerto no reinicia la placa.
+    # Con DTR y RTS en reposo, abrir el puerto no reinicia un ESP32. El Arduino Uno sí
+    # se reinicia (Linux sube DTR al abrir el puerto): el saludo espera a que arranque.
     connection.dtr = False
     connection.rts = False
     connection.open()
     return connection
 
 
-class Esp32Link:
-    """Connection with the ESP32, shared by the servos and the hand."""
+class ServoBoardLink:
+    """Connection with the servo board, shared by the servos and the hand."""
 
     def __init__(
         self,
@@ -155,7 +169,7 @@ class Esp32Link:
         self.resets = 0
         self.last_reset = ""
         self._connect()
-        self._thread = threading.Thread(target=self._loop, name="esp32-servos", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="servo-board", daemon=True)
         self._thread.start()
 
     # ------------------------------------------------------------------ estado
@@ -175,13 +189,25 @@ class Esp32Link:
             return 0
 
     @property
+    def board(self) -> str:
+        """«Arduino (ATmega328P)», «ESP32 (ESP32-D0WD)»… from the chip the firmware reports."""
+        chip = self.info.get("chip", "")
+        if chip.upper().startswith(("ATMEGA", "AVR")):
+            return f"Arduino ({chip})"
+        if chip.upper().startswith("ESP32"):
+            return f"ESP32 ({chip})"
+        return chip or tr("servo board")
+
+    @property
     def name(self) -> str:
-        return tr("ESP32 {port} (firmware {version}, hardware PWM)", port=self.port, version=self.info.get("fw", "?"))
+        return tr("{board} on {port} (firmware {version}, hardware PWM)",
+                  board=self.board, port=self.port, version=self.info.get("fw", "?"))
 
     def check_channels(self, channels: tuple[int, ...]) -> None:
         for channel in channels:
             if not 0 <= channel < self.channels:
-                raise ValueError(tr("the ESP32 firmware has {count} channels (0 to {last}); channel {channel} does not exist",
+                raise ValueError(tr("the servo board firmware has {count} channels (0 to {last}); "
+                                    "channel {channel} does not exist",
                                     count=self.channels, last=self.channels - 1, channel=channel))
 
     # ------------------------------------------------------------------ órdenes
@@ -226,6 +252,7 @@ class Esp32Link:
         self._configure()
 
     def _handshake(self, connection: Any, port: str) -> dict[str, str]:
+        # Mientras el Arduino está en su cargador, «?» no le hace daño: lo hace saltar antes al programa.
         self._buffer.clear()
         deadline = time.monotonic() + self.handshake_s
         next_ask = 0.0
@@ -236,14 +263,14 @@ class Esp32Link:
             for line in self._read_lines(connection):
                 info = parse_identity(line)
                 if info is None:
-                    log.debug(tr("ESP32 (before identifying itself): %s"), line)
+                    log.debug(tr("Servo board (before identifying itself): %s"), line)
                     continue
                 if info.get("proto") != str(PROTOCOL):
                     raise RuntimeError(tr("incompatible firmware on {port} (protocol {theirs}; Asgard uses {ours}): "
                                           "flash Asgard/Firmware/asgard_servos again",
                                           port=port, theirs=info.get("proto", "?"), ours=PROTOCOL))
                 return info
-        raise RuntimeError(tr("the ESP32 on {port} did not answer; does it have the asgard_servos firmware?", port=port))
+        raise RuntimeError(tr("the board on {port} did not answer; does it have the asgard_servos firmware?", port=port))
 
     def _configure(self) -> None:
         """Turns the watchdog on and repeats the last positions (after connecting or a restart)."""
@@ -272,7 +299,7 @@ class Esp32Link:
                 return
             self._serial = None
         if not self._stop.is_set():
-            log.warning(tr("The connection with the servo ESP32 was lost (%s); retrying every %.0f s."),
+            log.warning(tr("The connection with the servo board was lost (%s); retrying every %.0f s."),
                         error, self.retry_s)
         try:
             connection.close()
@@ -306,9 +333,9 @@ class Esp32Link:
                     break
                 try:
                     self._connect()
-                    log.info(tr("Servo ESP32 reconnected on %s."), self.port)
+                    log.info(tr("Servo board reconnected on %s."), self.port)
                 except Exception as error:
-                    log.debug(tr("ESP32 not available yet: %s"), error)
+                    log.debug(tr("Servo board not available yet: %s"), error)
                 continue
             try:
                 for line in self._read_lines(connection):
@@ -329,39 +356,46 @@ class Esp32Link:
                 self._configure()
             return
         if line.startswith("err"):
-            log.warning("ESP32: %s", line)
+            log.warning(tr("Servo board: %s"), line)
         elif line.startswith("warn"):
-            log.warning("ESP32: %s", line[len("warn"):].strip())
+            log.warning(tr("Servo board: %s"), line[len("warn"):].strip())
         else:
-            log.debug("ESP32: %s", line)
+            log.debug("Servo board: %s", line)
 
     def _report_boot(self, info: dict[str, str], unexpected: bool) -> None:
         reason = info.get("reset", "")
         self.last_reset = reason
-        text = tr(RESET_REASONS[reason]) if reason in RESET_REASONS else (reason or tr("unknown reason"))
-        if unexpected or reason not in _NORMAL_BOOT:
-            log.warning(tr("The servo ESP32 restarted: %s. The positions were sent again."), text)
+        if reason in RESET_REASONS:
+            text = tr(RESET_REASONS[reason])
+        elif unexpected:
+            # El Arduino no conserva el motivo (su cargador lo borra): se da la causa más probable.
+            text = tr("reason unknown; if it happens when the servos move, the board is losing power: "
+                      "power it from the Raspberry Pi's USB and check the servo supply (at least 1 A per servo)")
         else:
-            log.info(tr("Servo ESP32 ready (boot: %s)."), text)
+            text = tr("unknown reason")
+        if unexpected or reason not in _NORMAL_BOOT:
+            log.warning(tr("The servo board restarted: %s. The positions were sent again."), text)
+        else:
+            log.info(tr("Servo board ready: %s (boot: %s)."), self.board, text)
 
 
-_links: dict[str, Esp32Link] = {}
+_links: dict[str, ServoBoardLink] = {}
 _links_lock = threading.Lock()
 
 
-def acquire_link(port: str = "auto", factory: Callable[[str], Esp32Link] | None = None) -> Esp32Link:
-    """One connection per port: the servos and the hand use the same ESP32."""
+def acquire_link(port: str = "auto", factory: Callable[[str], ServoBoardLink] | None = None) -> ServoBoardLink:
+    """One connection per port: the servos and the hand use the same board."""
     key = (port or "auto").lower()
     with _links_lock:
         link = _links.get(key)
         if link is None or link.closed:
-            link = factory(port) if factory else Esp32Link(port)
+            link = factory(port) if factory else ServoBoardLink(port)
             _links[key] = link
         link.users += 1
         return link
 
 
-def release_link(link: Esp32Link) -> None:
+def release_link(link: ServoBoardLink) -> None:
     with _links_lock:
         link.users -= 1
         if link.users > 0:

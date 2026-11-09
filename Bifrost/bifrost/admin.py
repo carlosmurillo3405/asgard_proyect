@@ -26,6 +26,7 @@ from .database import Database, DatabaseError
 from .i18n import tr
 from .protocol import DEFAULT_PORT, format_fingerprint, local_ipv4_addresses
 from .security import certificate_file_fingerprint, generate_self_signed
+from .web import DEFAULT_WEB_PORT
 
 ADMIN_COMMANDS = ("user", "asgard", "permission", "sessions", "fingerprint", "certificate", "client", "status", "monitor")
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
@@ -193,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-fingerprint", action="store_true",
                    help=tr("do not pin the fingerprint (Let's Encrypt or other authority certificates, which are renewed)"))
     p.add_argument("--name", default="", help=tr("server name the users will see"))
+    p.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT,
+                   help=tr("web port of Bifröst, used by Midgard Web and the mobile apps ({port})", port=DEFAULT_WEB_PORT))
+    p.add_argument("--web-tls", action="store_true",
+                   help=tr("the web port uses HTTPS (Bifröst started with --web-tls; always true with --tls)"))
     p.add_argument("--output", type=Path, help=tr("file to write (shown on screen by default)"))
 
     commands.add_parser("status", parents=[common], help=tr("tells whether Bifröst is running and with which connections"))
@@ -219,7 +224,13 @@ def client_file(args: argparse.Namespace) -> int:
     except ValueError:
         print(tr("Error: the port in --server must be a number."), file=sys.stderr)
         return 1
+    if not 1 <= args.web_port <= 65535:
+        print(tr("Error: --web-port must be a number between 1 and 65535."), file=sys.stderr)
+        return 1
     data: dict[str, object] = {"server": host, "port": port, "tls": bool(args.tls)}
+    # Midgard Web y las apps móviles entran por el puerto web (WebSocket); el escritorio usa «port».
+    data["web_port"] = args.web_port
+    data["web_tls"] = bool(args.tls or args.web_tls)
     if args.tls and not args.no_fingerprint:
         cert = args.cert or tls_paths(args.data)[0]
         if not cert.exists():

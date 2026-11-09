@@ -8,4 +8,5 @@ sounddevice>=0.4.6
 mss>=9.0
 cryptography>=41
 PySide6-Essentials>=6.6
-pyserial>=3.5                # ESP32 de los servos (Asgard)
+pyserial>=3.5                # placa de los servos: Arduino Uno o ESP32 (Asgard)
+websockets>=13,<16           # puerto web de Bifröst (Midgard Web)

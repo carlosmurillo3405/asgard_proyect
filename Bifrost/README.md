@@ -9,11 +9,13 @@ Bifröst is the dedicated server (Linux) that joins the classroom **Asgards** wi
 - It creates the Midgard ⇄ Asgard session and relays commands, chat, telemetry, video, shared screen and audio.
 - It keeps the session when either side loses the network for a few seconds, and resumes it by itself.
 - It works on a **local network** or on a **public network (Internet)**; the mode is chosen with `--mode`.
+- On its **web port** (8080) it serves **Midgard Web**, the same interface in the browser, and the **Android and iOS apps** connect through it (see [Midgard Web and mobile apps](#midgard-web-and-mobile-apps)).
 - In the terminal it makes clear that it is **running**: it changes the title, hides the cursor and pins an animated status bar at the bottom (see [Live console](#live-console)).
 
 ```
 Midgard ──TCP/TLS 8765 (control + video)──┐                 ┌── Asgard
         ──UDP 5004 (encrypted audio)──────┤    Bifröst      ├──
+Web/apps ──HTTP(S) + WebSocket 8080───────┤                 │
                                           └─ SQLite (data)  ┘
 ```
 
@@ -21,7 +23,7 @@ Midgard ──TCP/TLS 8765 (control + video)──┐                 ┌── 
 
 - Linux with systemd (Debian 12+, Ubuntu 22.04+, Raspberry Pi OS…). It also runs on Windows or macOS for testing.
 - Python 3.10 or newer.
-- A single external dependency: `cryptography`.
+- Two external dependencies: `cryptography` and `websockets` (the web port).
 
 ## Quick install (Linux server)
 
@@ -32,7 +34,7 @@ sudo ./install.sh --mode local --admin admin
 
 The installer:
 
-1. Installs `python3-venv`, creates the `bifrost` system user and copies the program to `/opt/bifrost`.
+1. Installs `python3-venv`, creates the `bifrost` system user and copies the program (with Midgard Web) to `/opt/bifrost`.
 2. Creates the virtual environment and installs the dependencies.
 3. Keeps the data (database, certificates and logs) in `/var/lib/bifrost`.
 4. Installs and starts the **systemd** service `bifrost`, which starts with the machine and restarts by itself when it fails.
@@ -44,6 +46,9 @@ Its messages are in Spanish when the system is in Spanish (or with `--language e
 | --- | --- |
 | `--mode local\|public` | Server mode (`local` by default). |
 | `--port N` / `--audio-port N` | TCP and UDP ports (8765 and 5004). |
+| `--web-port N` | Port of Midgard Web and the mobile apps (8080). |
+| `--web-tls` | HTTPS on the web port in local mode too: browsers only allow the microphone and the camera on HTTPS pages. |
+| `--no-web` | Does not install Midgard Web or open the web port. |
 | `--public-name domain[,ip]` | Names for the public mode's self-signed certificate. |
 | `--cert PATH --key PATH` | Own certificate (for example, from Let's Encrypt). |
 | `--name "Text"` | Name the clients will see. |
@@ -87,6 +92,10 @@ python main.py --mode public --cert /path/fullchain.pem --key /path/privkey.pem
 | `--tls` | | Turns TLS on in local mode too. |
 | `--cert`, `--key` | | Own certificate. |
 | `--public-name` | | Domain(s) or IP(s) for the self-signed certificate. |
+| `--web-port` | `8080` | Port of Midgard Web and the mobile apps (HTTP and WebSocket). |
+| `--web-tls` | | HTTPS on the web port in local mode too (in public mode it is always on). |
+| `--no-web` | | Does not open the web port. |
+| `--web-root` | found by itself | Folder with Midgard Web (`web/` next to Bifröst or `Midgard/web` in the repository). |
 | `--name` | `Bifröst` | Visible name (`BIFROST_NAME` variable). |
 | `--grace` | `30` | Seconds a session is kept when a client disconnects. |
 | `--log-level` | `info` | `debug`, `info`, `warning` or `error`. |
@@ -161,6 +170,8 @@ bifrost monitor
 
 `server.json` is copied next to Midgard's installer (`Midgard/`) before installing or building the executable: that way every registered user already has the server assigned and only types their username and password. On the local network it is not needed: Midgard finds Bifröst by itself.
 
+The same file also carries the web port (`--web-port`, 8080; `--web-tls` when Bifröst uses HTTPS on it in local mode) for the [mobile apps](../Midgard/mobile/README.md), which are built with it.
+
 Users can change their own password from «View profile» in Midgard (the current one is asked for) and see their recent calls.
 
 Database changes apply immediately, without restarting the server. The database is SQLite (`bifrost.db`, WAL mode, schema version 2), with the tables `users`, `asgards`, `permissions` and `sessions`. Passwords and secrets are stored with a salted **scrypt** hash. A Bifröst 1.x database (Spanish tables) is not converted: Bifröst 2 rejects it with a message that explains it; create a new data folder and register the users and Asgards again.
@@ -180,8 +191,26 @@ Database changes apply immediately, without restarting the server. The database 
 | 8765 | TCP | Control, chat, commands, telemetry, video and screen (TLS in public mode) |
 | 5004 | UDP | Encrypted audio (when UDP is blocked, audio goes over TCP by itself) |
 | 8767 | UDP | Local network discovery (local mode only) |
+| 8080 | TCP | Midgard Web and the mobile apps: web pages and WebSocket (HTTPS in public mode or with `--web-tls`) |
 
-Only the server needs open ports: Asgard and Midgard make outgoing connections and go through NAT without configuring the router. When Bifröst is at home or at school behind a router, forward ports 8765/TCP and 5004/UDP on the router to the server.
+Only the server needs open ports: Asgard and Midgard make outgoing connections and go through NAT without configuring the router. When Bifröst is at home or at school behind a router, forward ports 8765/TCP, 8080/TCP and 5004/UDP on the router to the server.
+
+## Midgard Web and mobile apps
+
+Besides the desktop Midgard, two more clients use Bifröst's **web port** (8080 by default):
+
+- **Midgard Web**: the same interface as the desktop application, in the browser (Chrome, Edge, Firefox or Safari, also on phones and tablets). Open `http://<server>:8080` (`https://` with TLS), sign in and enter the Asgard. When Bifröst starts, it shows the address as «Midgard Web». See [Midgard/web](../Midgard/web/README.md).
+- The **Android and iOS apps**, built from Midgard Web: see [Midgard/mobile](../Midgard/mobile/README.md).
+
+Commands, chat, audio and video travel over a WebSocket (`/ws`) with the same packets as the desktop, so for the rest of Bifröst they are ordinary Midgard clients (same users, permissions, sessions and reconnection). Browsers only allow the **microphone and the camera on HTTPS pages** (or on `localhost`):
+
+| Situation | What to do |
+| --- | --- |
+| Public mode | The web port always uses HTTPS with the same certificate as 8765. With Let's Encrypt nothing else is needed; with a self-signed certificate the browser warns once and the mobile apps cannot connect (they need a trusted certificate). |
+| Local network, with microphone and camera | Start Bifröst with `--web-tls` (installer: `--web-tls`): it uses its self-signed certificate, and each browser asks once to accept it. |
+| Local network, only watching, listening and chat | Plain `http://` is enough; the browser keeps the microphone and the camera off. |
+
+The installer copies `Midgard/web` to `/opt/bifrost/web`. The pages are served with a strict content policy (CSP) and load nothing from outside the server. `--no-web` closes the port.
 
 ## Public network and certificates
 
@@ -215,16 +244,30 @@ The protocol reference is in [Common/README.md](../Common/README.md).
 | The terminal has no cursor after Bifröst was killed | Run `reset` (or `tput cnorm`). With Ctrl+C or `systemctl stop` it is restored by itself. |
 | Clients cannot connect from the Internet | Open 8765/TCP and 5004/UDP in the firewall and at the provider or the router; use `--mode public` with TLS on the clients. |
 | Audio arrives choppy | When UDP is blocked audio uses TCP, which copes worse with packet loss: open 5004/UDP. |
+| Midgard Web does not allow the microphone or the camera | The page is not on HTTPS: use `--web-tls` on the local network, or public mode. |
+| Midgard Web does not open | Open 8080/TCP (`--web-port`) in the firewall; the start-up summary says whether Midgard Web was found. |
 
 ## Uninstalling
 
 ```bash
-sudo systemctl disable --now bifrost
-sudo rm -rf /opt/bifrost /etc/systemd/system/bifrost.service /usr/local/bin/bifrost
-sudo rm -rf /var/lib/bifrost        # only when you also want to delete users, Asgards and certificates
-sudo userdel bifrost
+sudo /opt/bifrost/uninstall.sh                  # or ./uninstall.sh from the repository
 ```
+
+It stops and disables the service, removes `/opt/bifrost`, the unit and the `bifrost` command, and asks whether to also delete the data (`/var/lib/bifrost`: users, Asgards, certificates and history) and whether to close the firewall ports Bifröst opened (the web port too, when it was installed with Midgard Web). By default the data and the `bifrost` system user are kept, so running `install.sh` again brings everything back. It works for Bifröst 1.x and 2.x: it reads the real paths and ports from the systemd unit.
+
+| Option | Effect |
+| --- | --- |
+| `--keep-data` | Keeps the data and the system user without asking. |
+| `--purge` | Also deletes the data and the `bifrost` system user. |
+| `--backup FILE.tar.gz` | Saves a copy of the data before deleting it (interactively it is offered by itself). |
+| `--close-firewall` / `--keep-firewall` | Closes the ports in ufw/firewalld, or leaves them. |
+| `--yes` | Asks nothing (keeps the data and the firewall unless told otherwise). |
+| `--env-only` | No sudo: removes the `.venv` of a test install (`install.sh --env-only`); with `--purge`, also `./data`. |
+| `--dry-run` | Shows what it would do without changing anything. |
+| `--language auto\|en\|es` | Language of the messages. |
+
+The system packages (`python3-venv`, `python3-pip`) are left installed, and the old logs stay in the journal (`journalctl -u bifrost`).
 
 ## Development
 
-`protocol.py` and `i18n.py` are copies of the ones in `Common/`: edit the originals and run `python Common/sync.py`. The live console is in `bifrost/console.py`; Bifröst's Spanish texts are in `bifrost/locale/bifrost.es.json`.
+`protocol.py` and `i18n.py` are copies of the ones in `Common/`: edit the originals and run `python Common/sync.py`. The live console is in `bifrost/console.py` and the web port (Midgard Web files and WebSocket) in `bifrost/web.py`; Bifröst's Spanish texts are in `bifrost/locale/bifrost.es.json`.

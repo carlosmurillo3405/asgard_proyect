@@ -1,65 +1,79 @@
-# ESP32 firmware for Asgard's servos
+# Servo board firmware (Arduino Uno)
 
 **English** · [Español](README.es.md)
 
-`asgard_servos/` is a **PlatformIO** project that turns an ESP32 into the driver of Asgard's servos (pan, tilt and hand). The Raspberry Pi sends it each servo's pulse width over USB and the ESP32 generates the signal with its **hardware PWM**. That way the pulses do not vary even when the Raspberry Pi is at 100 % with the AI and the video, which is what makes the servos jitter or «go crazy» with `gpiozero`'s software PWM.
+`asgard_servos/` is a **PlatformIO** project that turns an **Arduino Uno** into the driver of Asgard's servos (pan, tilt and hand). The Raspberry Pi sends each servo's pulse width over USB and the Arduino generates the signal with the **hardware timers** of its ATmega328P. That way the pulses do not vary even when the Raspberry Pi is at 100 % with the AI and the video, which is what makes the servos jitter or «go crazy» with `gpiozero`'s software PWM.
+
+An Uno is enough and cheap: three servo signals need very little. The same firmware also builds for an **Arduino Nano** and, if you already have one, for an **ESP32**.
 
 Also:
 
-- **It starts without pulses.** The servos do not jump when powering on or when flashing the ESP32.
+- **It starts without pulses.** The servos do not jump when powering on or when flashing the board.
 - **Watchdog.** When the Raspberry Pi stops sending data for 1.5 s (it hung or the cable was unplugged), it releases the servos.
-- **It reports resets.** When it resets because of a voltage drop, it says so and Asgard writes it to its log and sends the positions again.
+- **It announces every start.** When it restarts in the middle of a session (usually a voltage drop), Asgard logs it and sends the positions again.
 
 ## Channels and pins
 
-| Channel | Use | Classic ESP32 (DevKit, WROOM-32) | ESP32-S3 / C3 / C6 |
-| --- | --- | --- | --- |
-| 0 | Pan (horizontal) | GPIO 25 | GPIO 4 |
-| 1 | Tilt (vertical) | GPIO 26 | GPIO 5 |
-| 2 | Hand | GPIO 27 | GPIO 6 |
+| Channel | Use | Arduino Uno / Nano | Signal on the Arduino | Classic ESP32 | ESP32-S3 / C3 / C6 |
+| --- | --- | --- | --- | --- | --- |
+| 0 | Pan (horizontal) | **D9** | Timer1 (OC1A): 0.5 µs steps, 50 Hz | GPIO 25 | GPIO 4 |
+| 1 | Tilt (vertical) | **D10** | Timer1 (OC1B): 0.5 µs steps, 50 Hz | GPIO 26 | GPIO 5 |
+| 2 | Hand | **D3** | Timer2 (OC2B): 64 µs steps (~6°), 61 Hz | GPIO 27 | GPIO 6 |
 
-They are pins with no boot (*strapping*) function and they do not share the serial port. To use others, change `PINS[]` in `include/config.h`.
+On the Arduino every channel comes out of a timer's comparator, so the pulse is generated entirely by hardware: neither the program nor the serial port interrupts can shift it. Pan and tilt get 0.5 µs resolution (about 0.05°); the hand, which only goes up and down, gets 64 µs steps. Timer0 is left alone (`millis()`), and D0/D1 (serial port) and D13 (LED) are not used. On the ESP32 the pins can be changed in `PINS[]` (`include/config.h`); on the Arduino they are fixed by the timers (D9, D10 and D3), and moving them needs changes in `src/servos_avr.cpp`.
 
 ## Layout
 
 ```
 asgard_servos/
-  platformio.ini        boards (esp32dev, esp32-s3, esp32-c3) and serial monitor
-  include/config.h      pins, firmware and protocol versions, pulse limits
-  include/servos.h      PWM signal interface
-  include/protocol.h    serial command interface
-  src/main.cpp          setup() and loop()
-  src/servos.cpp        hardware PWM (LEDC), esp32 core 2.x and 3.x
-  src/protocol.cpp      commands, identification, watchdog and reset reason
+  platformio.ini          boards: uno (default), nano, nano-old, esp32dev, esp32-s3, esp32-c3
+  include/config.h        pins, firmware and protocol versions, pulse limits
+  include/board.h         chip model and reset reason
+  include/servos.h        PWM signal interface
+  include/protocol.h      serial command interface
+  src/main.cpp            setup() and loop()
+  src/servos_avr.cpp      hardware PWM on the Arduino (Timer1 and Timer2)
+  src/servos_esp32.cpp    hardware PWM on the ESP32 (LEDC)
+  src/board.cpp           reset reason (MCUSR on the Arduino, esp_reset_reason on the ESP32)
+  src/protocol.cpp        commands, identification and watchdog
 ```
 
-Code names and protocol messages are in English; comments are in Spanish.
+Code names and protocol messages are in English; comments are in Spanish. On the Uno it uses about 330 bytes of RAM (of 2 KB) and 5.7 KB of flash.
 
 ## Flashing the firmware
 
 **VS Code** with the *PlatformIO IDE* extension:
 
 1. *File → Open Folder…* → `Asgard/Firmware/asgard_servos`.
-2. Pick the environment in the bottom bar (`env:esp32dev` for a classic ESP32).
-3. Connect the ESP32 and press **→ Upload** in the bottom bar.
+2. The default environment is `env:uno` (pick another one in the bottom bar for a Nano or an ESP32).
+3. Connect the Arduino and press **→ Upload** in the bottom bar.
 
 **Terminal**, from `asgard_servos/`:
 
 ```bash
-pio run -t upload                  # classic ESP32 (default environment: esp32dev)
-pio run -e esp32-s3 -t upload      # or -e esp32-c3
+pio run -t upload                  # Arduino Uno (default environment)
+pio run -e nano -t upload          # Arduino Nano (new bootloader; old clones: -e nano-old)
+pio run -e esp32dev -t upload      # ESP32 (or -e esp32-s3, -e esp32-c3)
 ```
 
-The platform is pinned to `espressif32 @ 6.10.0` (Arduino core 2.0.17), so everybody builds the same. When an ESP32-S3 or C3 is connected through its native USB, not through the USB-serial converter, add `build_flags = -DARDUINO_USB_CDC_ON_BOOT=1` to its environment in `platformio.ini`.
+**From the Raspberry Pi itself** (no PC needed), with the Arduino plugged into its USB:
 
-> Asgard 2 needs firmware 2.0 (protocol 2). When the ESP32 has firmware 1.x, Asgard reports «incompatible firmware»: flash it again.
+```bash
+python3 -m venv ~/platformio && ~/platformio/bin/pip install platformio   # once
+cd Asgard/Firmware/asgard_servos
+~/platformio/bin/pio run -t upload           # it downloads the AVR toolchain for ARM by itself
+```
+
+Stop Asgard while flashing (`systemctl --user stop asgard`, or close its window): the port can only be used by one program.
+
+> Asgard 2 uses firmware protocol 2. Boards flashed with firmware 2.0 (ESP32) keep working; with firmware 1.x Asgard reports «incompatible firmware»: flash it again.
 
 ## Trying it without the Raspberry Pi
 
 Open the serial monitor (**🔌 Serial Monitor** in VS Code, or `pio device monitor`). It is already set to 115200 baud and sends each line when Enter is pressed. Type:
 
 ```
-?            → ASGARD-SERVOS proto=2 channels=3 fw=2.0.0 chip=… timeout=0
+?            → ASGARD-SERVOS proto=2 channels=3 fw=2.1.0 chip=ATmega328P timeout=0
 S 0 1500     → pan to the center (1500 µs)
 S 0 1000 1 2000
 E            → state timeout=0 0=1000 1=2000 2=0
@@ -67,21 +81,44 @@ X            → releases everything
 H            → help
 ```
 
+Opening the monitor restarts the Uno (that is how its USB works): after about 2 seconds it writes `ASGARD-SERVOS ready … reset=unknown`.
+
 ## Using it with Asgard
 
-1. Connect the ESP32 to a USB port of the Raspberry Pi, with a data cable.
+### Over USB (recommended)
+
+The USB cable carries the data and the Arduino's power; it is a serial port at 115200 baud: sending a full position (`S 0 1500 1 1500`) takes about 1.4 ms.
+
+1. Connect the Arduino to a USB port of the Raspberry Pi with a **data** cable.
 2. On the Raspberry Pi:
    ```bash
-   ./install.sh --servos esp32       # installs pyserial and adds your user to the dialout group
+   ./install.sh --servos arduino     # installs pyserial and adds your user to the dialout group
    sudo reboot                       # only the first time, to apply the group
    .venv/bin/python main.py --test-servos
    .venv/bin/python main.py --test-hand
    ```
-3. `--test-servos` must show `Driver: ESP32 /dev/ttyUSB0 (firmware 2.0.0, hardware PWM) channels 0/1`.
+3. `--test-servos` must show `Driver: Arduino (ATmega328P) on /dev/ttyACM0 (firmware 2.1.0, hardware PWM) channels 0/1`.
 
-The port is detected by itself. With several serial devices, set it in `asgard.ini` with `[servos] serial_port = /dev/ttyUSB0` (or `/dev/ttyACM0`). Calibration stays in `asgard.ini`: `min_pulse_us`, `max_pulse_us`, the limits and the speed.
+The port is detected by itself: `/dev/ttyACM0` on an original Uno, `/dev/ttyUSB0` on clones with a CH340 chip. With several serial devices, set it in `asgard.ini` with `[servos] serial_port = /dev/ttyACM0`. Calibration stays in `asgard.ini`: `min_pulse_us`, `max_pulse_us`, the limits and the speed.
 
-Wiring, power and ground are in the [Asgard guide](../Software/README.md#esp32-wiring-recommended).
+When Asgard opens the port, the Uno restarts and takes about 2 seconds to answer: that is normal, Asgard waits for it, and the servos stay released meanwhile.
+
+### Straight to the Raspberry Pi's UART (alternative)
+
+Without a USB cable, the Arduino can talk to the GPIO serial port:
+
+| Raspberry Pi | Arduino |
+| --- | --- |
+| GPIO 14 / TXD (pin 8) | D0 (RX) |
+| GPIO 15 / RXD (pin 10) | D1 (TX) **through a divider**: D1 ──[ 1 kΩ ]──●──[ 2 kΩ ]── GND, and the middle point to GPIO 15 |
+| GND (pin 6) | GND |
+
+- The divider is mandatory: the Arduino's TX is 5 V and the Raspberry Pi's pins only accept 3.3 V.
+- Enable the UART: `sudo raspi-config` → *Interface Options* → *Serial Port* → login shell **No**, serial hardware **Yes**, and reboot.
+- In `asgard.ini`: `[servos] serial_port = /dev/serial0`.
+- Power the Arduino through its jack or VIN (7–12 V), **not** through USB connected to a computer: its USB chip also drives D0 and would fight the Raspberry Pi. Disconnect D0/D1 to flash it.
+
+The wiring of the servos, the power supply and the ground is in the [Asgard guide](../Software/README.md#arduino-uno-wiring-recommended).
 
 ## Protocol (version 2)
 
@@ -97,6 +134,4 @@ Text at 115200 baud, one command per line (`\n`):
 | `E` | `state timeout=… 0=… 1=… 2=…` | Current pulses |
 | `H` | `# …` lines | Help |
 
-At boot it writes `ASGARD-SERVOS ready proto=2 channels=3 fw=… chip=… reset=<reason>`, where the reason can be `poweron`, `external`, `software`, `brownout` (voltage drop), `panic`, `watchdog`, `deepsleep` or `other`. When the watchdog releases the servos it writes `warn no data from the Raspberry Pi: servos released`. Errors start with `err` and confirmations with `ok`.
-
-The signal is 50 Hz with 14-bit resolution (1.22 µs per step, about 0.12° with the default calibration).
+At boot it writes `ASGARD-SERVOS ready proto=2 channels=3 fw=… chip=… reset=<reason>`. On the ESP32 the reason can be `poweron`, `external`, `software`, `brownout` (voltage drop), `panic`, `watchdog`, `deepsleep` or `other`. On the Arduino it is almost always `unknown`, because its bootloader (Optiboot) clears the reset register; when it restarts in the middle of a session, Asgard explains the most likely cause (a voltage drop). When the watchdog releases the servos it writes `warn no data from the Raspberry Pi: servos released`. Errors start with `err` and confirmations with `ok`.

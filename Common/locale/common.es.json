@@ -134,6 +134,7 @@
   "Unknown operation: {op}": "Operación desconocida: {op}",
   "Unknown packet type: {kind}.": "Tipo de paquete desconocido: {kind}.",
   "Unsupported SVG command: {command}": "Comando SVG no admitido: {command}",
+  "Updated: {path}": "Actualizado: {path}",
   "warning  no MediaPipe: Asgard in simulation works, but without AI": "aviso    sin MediaPipe: Asgard en simulación funciona, pero sin IA",
   "Warning: {text}": "Aviso: {text}",
   "Wrong username or password.": "Usuario o contraseña incorrectos.",

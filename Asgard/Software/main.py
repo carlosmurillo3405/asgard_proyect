@@ -181,7 +181,7 @@ def test_servos(config_path: Path) -> int:
     print(tr("Driver: {name}", name=backend.name))
     if getattr(backend, "software_pwm", False):
         print("  " + tr("Warning: with software PWM the servos may jitter or move by themselves when the CPU is busy."))
-        print("  " + tr("Use an ESP32 (driver = esp32), a PCA9685 or pigpio (Raspberry Pi 4)."))
+        print("  " + tr("Use an Arduino Uno (driver = arduino), a PCA9685 or pigpio (Raspberry Pi 4)."))
     elif getattr(backend, "simulated", False) and servos.driver != "sim":
         print("  " + tr("The configured driver could not be used; check the message above."))
     pantilt = PanTilt(backend, (servos.pan_min, servos.pan_max), (servos.tilt_min, servos.tilt_max),
@@ -206,9 +206,9 @@ def test_servos(config_path: Path) -> int:
         print(tr("If an axis moved the wrong way, change invert_pan/invert_tilt in asgard.ini."))
         link = getattr(backend, "link", None)
         if link is not None and link.resets:
-            print("  " + tr("Warning: the ESP32 restarted {count} time(s) during the test (last reason: {reason}). "
-                            "It is almost always the power supply: see «ESP32 connection» in the README.",
-                            count=link.resets, reason=link.last_reset))
+            print("  " + tr("Warning: the servo board restarted {count} time(s) during the test (last reason: {reason}). "
+                            "It is almost always the power supply: see «Arduino Uno wiring» in the README.",
+                            count=link.resets, reason=link.last_reset or "?"))
     finally:
         pantilt.close()
     return 0
@@ -337,7 +337,8 @@ def check_installation(config_path: Path) -> int:
         (tr("AI (MediaPipe)"), "import mediapipe"),
         (tr("Servos over GPIO (gpiozero)"), "import gpiozero"),
         (tr("Servos over I2C (PCA9685)"), "import adafruit_servokit"),
-        (tr("Servos over ESP32 (pyserial)"), "from asgard.esp32 import describe_ports; detail = describe_ports()"),
+        (tr("Servo board over USB: Arduino or ESP32 (pyserial)"),
+         "from asgard.servo_board import describe_ports; detail = describe_ports()"),
         (tr("CSI camera (picamera2)"), "import picamera2"),
     ]
     problems = 0

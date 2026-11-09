@@ -25,4 +25,12 @@ __pycache__/
 *.log
 /Midgard/midgard.ico
 /Midgard/midgard.png
+# Apps móviles: Midgard/mobile/build_mobile.py genera todo esto (también los proyectos nativos)
+/Midgard/mobile/node_modules/
+/Midgard/mobile/www/
+/Midgard/mobile/assets/
+/Midgard/mobile/android/
+/Midgard/mobile/ios/
+/Midgard/mobile/build/
+/Midgard/mobile/dist/
 /Demo/data/

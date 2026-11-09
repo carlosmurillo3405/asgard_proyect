@@ -52,7 +52,8 @@ Opciones:
   --tls                     conexión cifrada (Bifröst en modo público)
   --fingerprint HUELLA      huella SHA-256 del certificado de Bifröst (bifrost fingerprint)
   --camera N|picamera2      cámara USB (índice) o CSI
-  --servos gpiozero|pca9685|esp32|sim
+  --servos gpiozero|pca9685|arduino|esp32|sim
+                            arduino: Arduino Uno por USB (recomendado; esp32 también sirve)
   --hand servo|gpio|sim|none
   --model lite|full|heavy   modelo de IA (full por defecto; lite es más rápido)
   --start desktop|service|none
@@ -75,7 +76,8 @@ Options:
   --tls                     encrypted connection (Bifröst in public mode)
   --fingerprint FINGERPRINT SHA-256 fingerprint of Bifröst's certificate (bifrost fingerprint)
   --camera N|picamera2      USB camera (index) or CSI
-  --servos gpiozero|pca9685|esp32|sim
+  --servos gpiozero|pca9685|arduino|esp32|sim
+                            arduino: Arduino Uno over USB (recommended; esp32 works too)
   --hand servo|gpio|sim|none
   --model lite|full|heavy   AI model (full by default; lite is faster)
   --start desktop|service|none
@@ -187,8 +189,8 @@ if [ "$APT" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
     fi
     if [ "$PIGPIO" -eq 1 ]; then
         sudo systemctl enable --now pigpiod >/dev/null 2>&1 \
-            || warn "$(t "pigpiod did not start (it is not supported on Raspberry Pi 5; use a PCA9685 or an ESP32)." \
-                         "pigpiod no arrancó (en Raspberry Pi 5 no está soportado; usa un PCA9685 o un ESP32).")"
+            || warn "$(t "pigpiod did not start (it is not supported on Raspberry Pi 5; use an Arduino Uno or a PCA9685)." \
+                         "pigpiod no arrancó (en Raspberry Pi 5 no está soportado; usa un Arduino Uno o un PCA9685).")"
     fi
 fi
 
@@ -223,9 +225,11 @@ if [ "$SERVOS" = "pca9685" ] || grep -Eq '^[[:space:]]*driver[[:space:]]*=[[:spa
     info "$(t "Installing PCA9685 support" "Instalando soporte para PCA9685")"
     "$PY" -m pip install --quiet -c "$CONSTRAINTS" -r "$DIR/requirements-pca9685.txt"
 fi
-if [ "$SERVOS" = "esp32" ] || grep -Eq '^[[:space:]]*driver[[:space:]]*=[[:space:]]*esp32' "$CONFIG" 2>/dev/null; then
-    info "$(t "Installing ESP32 support (pyserial)" "Instalando soporte para el ESP32 (pyserial)")"
-    "$PY" -m pip install --quiet -c "$CONSTRAINTS" -r "$DIR/requirements-esp32.txt"
+if [ "$SERVOS" = "arduino" ] || [ "$SERVOS" = "esp32" ] \
+    || grep -Eq '^[[:space:]]*driver[[:space:]]*=[[:space:]]*(arduino|esp32)' "$CONFIG" 2>/dev/null; then
+    info "$(t "Installing support for the servo board over the serial port (pyserial)" \
+              "Instalando soporte para la placa de servos por puerto serie (pyserial)")"
+    "$PY" -m pip install --quiet -c "$CONSTRAINTS" -r "$DIR/requirements-serial.txt"
 fi
 AI_OK=0
 if [ "$AI" -eq 1 ]; then

@@ -6,6 +6,10 @@ Server::
 
     python main.py --mode local                 # local network (no TLS, with discovery)
     python main.py --mode public --public-name my-server.com
+    python main.py --mode local --web-tls       # Midgard Web over HTTPS on the local network
+
+The web port (8080 by default) serves Midgard Web and the mobile apps; see
+``bifrost/web.py``.
 
 Administration::
 
@@ -46,8 +50,10 @@ from bifrost.protocol import (
 )
 from bifrost.security import certificate_file_fingerprint, server_ssl_context
 from bifrost.server import MODE_LOCAL, MODE_PUBLIC, BifrostServer, ServerConfig
+from bifrost.web import DEFAULT_WEB_PORT, WebGateway, available as web_available, find_web_root
 
 log = logging.getLogger("bifrost")
+PROGRAM_DIR = Path(__file__).resolve().parent
 
 
 def _mode(value: str) -> str:
@@ -90,6 +96,13 @@ def parse_server_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--key", type=Path, help=tr("private key of the own certificate (privkey.pem)"))
     parser.add_argument("--public-name", default="",
                         help=tr("public domain(s) or IP(s) for the self-signed certificate, separated by commas"))
+    parser.add_argument("--web-port", type=_port, default=DEFAULT_WEB_PORT,
+                        help=tr("port of Midgard Web and the mobile apps ({port})", port=DEFAULT_WEB_PORT))
+    parser.add_argument("--no-web", action="store_true", help=tr("does not open the web port"))
+    parser.add_argument("--web-tls", action="store_true",
+                        help=tr("HTTPS on the web port in local mode too (browsers only allow the microphone "
+                                "and the camera on HTTPS pages)"))
+    parser.add_argument("--web-root", type=Path, help=tr("folder with Midgard Web (found by itself by default)"))
     parser.add_argument("--name", default=os.environ.get("BIFROST_NAME") or "Bifröst",
                         help=tr("server name the clients will see (BIFROST_NAME variable)"))
     parser.add_argument("--grace", type=float, default=30.0,
@@ -183,7 +196,29 @@ def _quiet_handshake_errors(loop: asyncio.AbstractEventLoop, context: dict) -> N
     loop.default_exception_handler(context)
 
 
-def print_summary(server: BifrostServer, config: ServerConfig, db: Database, data_dir: Path, styled: bool) -> None:
+def build_web(args: argparse.Namespace, config: ServerConfig, server: BifrostServer) -> WebGateway | None:
+    """The web port, or None when it is disabled or the websockets library is missing."""
+    if args.no_web:
+        return None
+    if not web_available():
+        log.warning(tr("The web port is disabled: the websockets library is missing (pip install -r requirements.txt)."))
+        return None
+    context = config.ssl_context
+    if context is None and args.web_tls:
+        names = [name.strip() for name in args.public_name.split(",") if name.strip()] or None
+        cert, key, _, created = ensure_certificate(args.data, names)
+        if created:
+            log.info(tr("A self-signed TLS certificate was generated in %s"), cert)
+        context = server_ssl_context(cert, key)
+    root = find_web_root(PROGRAM_DIR, args.web_root)
+    if root is None:
+        log.warning(tr("Midgard Web was not found (copy Midgard/web next to Bifröst or use --web-root); "
+                       "the web port only accepts the mobile apps."))
+    return WebGateway(server._on_client, config.host, args.web_port, root, context)
+
+
+def print_summary(server: BifrostServer, config: ServerConfig, db: Database, data_dir: Path, styled: bool,
+                  web: WebGateway | None = None) -> None:
     counts = db.counts()
     mode = tr("PUBLIC (Internet)") if config.mode == MODE_PUBLIC else tr("LOCAL (local network)")
     warning = tr("Warning")
@@ -203,7 +238,17 @@ def print_summary(server: BifrostServer, config: ServerConfig, db: Database, dat
     addresses = local_ipv4_addresses()
     if addresses:
         lines.append((tr("This machine's IP"), ", ".join(addresses)))
-    lines.append((tr("Firewall"), tr("allow TCP {tcp} and UDP {udp}", tcp=server.tcp_port, udp=server.audio_port)))
+    if web is not None:
+        scheme = "https" if web.tls else "http"
+        host = addresses[0] if addresses else "<IP>"
+        lines.append(("Midgard Web", f"{scheme}://{host}:{web.port}"))
+        if not web.tls:
+            lines.append((warning, tr("the web port has no TLS: browsers will not allow the microphone or the "
+                                      "camera. Use --web-tls (or public mode).")))
+        lines.append((tr("Firewall"), tr("allow TCP {tcp} and {web}, and UDP {udp}",
+                                         tcp=server.tcp_port, web=web.port, udp=server.audio_port)))
+    else:
+        lines.append((tr("Firewall"), tr("allow TCP {tcp} and UDP {udp}", tcp=server.tcp_port, udp=server.audio_port)))
     if config.mode == MODE_PUBLIC:
         lines.append(("Midgard", tr("hand out server.json: python main.py client --server <domain> --tls")))
     if counts["users"] == 0:
@@ -222,7 +267,14 @@ async def run_server(args: argparse.Namespace, styled: bool) -> None:
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(_quiet_handshake_errors)
     await server.start()
-    print_summary(server, config, db, args.data, styled)
+    web = build_web(args, config, server)
+    if web is not None:
+        try:
+            await web.start()
+        except OSError as error:
+            log.error(tr("The web port %s could not be opened: %s"), args.web_port, error)
+            web = None
+    print_summary(server, config, db, args.data, styled, web)
     bar = StatusBar(sys.stdout, server.status) if styled else None
     stop = asyncio.Event()
     for signal_number in (signal.SIGINT, signal.SIGTERM):
@@ -251,6 +303,8 @@ async def run_server(args: argparse.Namespace, styled: bool) -> None:
         log.info(tr("Stopping Bifröst..."))
         serving.cancel()
         await asyncio.gather(serving, return_exceptions=True)
+        if web is not None:
+            await web.stop()
         await server.stop()
         log.info(tr("Bifröst stopped."))
 

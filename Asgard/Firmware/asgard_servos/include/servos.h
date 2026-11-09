@@ -1,4 +1,5 @@
-// Señal de los servos con el PWM por hardware del ESP32 (LEDC).
+// Señal de los servos con el PWM por hardware de la placa:
+// temporizadores del ATmega328P (Arduino Uno/Nano) o LEDC del ESP32.
 #pragma once
 
 #include <Arduino.h>
