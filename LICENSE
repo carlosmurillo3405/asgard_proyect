@@ -1,0 +1,48 @@
+Copyright (c) 2026 Carlos Murillo. All rights reserved.
+
+Proyecto Asgard (Asgard, Bifröst, Midgard, Midgard Web, mobile apps and Common)
+
+ENGLISH
+
+This software, including its source code, object code, documentation,
+designs, images and the "UI-Asgard" visual kit (the "Software"), is the
+exclusive property of the copyright holder and is protected by copyright law.
+
+No license or right is granted to any person to use, copy, modify, merge,
+publish, distribute, sublicense, sell, or create derivative works of the
+Software, in whole or in part, without the prior written permission of the
+copyright holder. Viewing the Software in a public repository does not grant
+any of these rights.
+
+Third-party components included or used by the Software (for example
+MediaPipe, Qt / PySide6 / PyQt and other libraries) remain subject to their
+own licenses, which are not modified by this notice.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+For permission requests, contact the copyright holder.
+
+ESPAÑOL
+
+Este software, incluidos su código fuente, código objeto, documentación,
+diseños, imágenes y el kit visual «UI-Asgard» (el «Software»), es propiedad
+exclusiva del titular de los derechos y está protegido por la Ley Federal del
+Derecho de Autor y los tratados internacionales aplicables.
+
+No se concede a ninguna persona licencia ni derecho alguno para usar, copiar,
+modificar, fusionar, publicar, distribuir, sublicenciar, vender o crear obras
+derivadas del Software, total o parcialmente, sin el permiso previo y por
+escrito del titular. Que el Software pueda verse en un repositorio público no
+otorga ninguno de estos derechos.
+
+Los componentes de terceros que el Software incluye o utiliza (por ejemplo
+MediaPipe, Qt / PySide6 / PyQt y otras bibliotecas) siguen sujetos a sus
+propias licencias, que este aviso no modifica.
+
+EL SOFTWARE SE PROPORCIONA «TAL CUAL», SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O
+IMPLÍCITA. EN NINGÚN CASO EL TITULAR SERÁ RESPONSABLE DE RECLAMACIONES, DAÑOS
+U OTRAS RESPONSABILIDADES DERIVADAS DEL USO DEL SOFTWARE.
+
+Para solicitar permisos, contacte al titular de los derechos.
