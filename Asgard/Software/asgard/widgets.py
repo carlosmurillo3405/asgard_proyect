@@ -1216,9 +1216,15 @@ class ModalLayer(QtWidgets.QWidget):
         super().__init__(host)
         self._close_outside = close_on_outside_click
         self._closing = False
+        self._width = width              # ancho pedido: la tarjeta vuelve a él si la ventana crece
+        self._target_y = 0
+        self._refit_pending = False
         self.card = Card(self, margin=28, spacing=14)
         self.card.setFixedWidth(width)
         self.card.setMaximumWidth(width)
+        # La tarjeta no está en un layout: sin esto conservaría la altura que tenía al abrirse
+        # aunque su contenido crezca (por ejemplo, una sección que se reacomoda en más filas).
+        self.card.installEventFilter(self)
         shadow = QtWidgets.QGraphicsDropShadowEffect(self.card)
         shadow.setBlurRadius(40)
         shadow.setOffset(0, 12)
@@ -1233,23 +1239,32 @@ class ModalLayer(QtWidgets.QWidget):
         if obj is self.parent() and event.type() == QtCore.QEvent.Type.Resize:
             self.setGeometry(self.parentWidget().rect())
             self._center()
+        elif (obj is self.card and event.type() == QtCore.QEvent.Type.LayoutRequest
+              and self.isVisible() and not self._refit_pending):
+            # El contenido cambió de tamaño: se ajusta la tarjeta cuando Qt termine de acomodarlo.
+            self._refit_pending = True
+            QtCore.QTimer.singleShot(0, self._refit)
         return False
 
+    def _refit(self) -> None:
+        self._refit_pending = False
+        if not self._closing:
+            self._center()
+
     def _center(self) -> None:
+        self.card.setFixedWidth(min(self._width, max(260, self.width() - 32)))
         self.card.adjustSize()
-        width = min(self.card.width(), max(260, self.width() - 32))
-        self.card.setFixedWidth(width)
-        self.card.adjustSize()
-        self.card.move((self.width() - self.card.width()) // 2, max(16, (self.height() - self.card.height()) // 2))
+        self._target_y = max(16, (self.height() - self.card.height()) // 2)
+        self.card.move((self.width() - self.card.width()) // 2, self._target_y)
 
     def open(self) -> None:
         self.setGeometry(self.parentWidget().rect())
         self._center()
         self.raise_()
-        target = self.card.y()
 
         def slide(t: float) -> None:
-            self.card.move(self.card.x(), round(target + 14 * (1 - t)))
+            # _target_y sigue a la tarjeta si cambia de altura durante la animación.
+            self.card.move(self.card.x(), round(self._target_y + 14 * (1 - t)))
 
         fade_in(self, 220)
         animate(self.card, 0.0, 1.0, 260, slide, name="enter")

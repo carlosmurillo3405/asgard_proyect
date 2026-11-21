@@ -296,6 +296,7 @@ class ServerSection(QtWidgets.QWidget):
             for column in range(5):
                 self.grid.setColumnStretch(column, 1 if column == 0 else 0)
             self.grid.setColumnMinimumWidth(2, 0)
+        self.updateGeometry()        # cambia la altura: quien la contiene debe volver a medirla
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
