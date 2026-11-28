@@ -34,3 +34,6 @@ __pycache__/
 /Midgard/mobile/build/
 /Midgard/mobile/dist/
 /Demo/data/
+
+# Lanzadores locales de pruebas: llevan secretos de Asgard (no se versionan)
+/prueba*.bat
