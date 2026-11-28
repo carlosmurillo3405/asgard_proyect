@@ -29,32 +29,27 @@ Atajos: **F11** alterna la pantalla completa y **Ctrl+Q** cierra. En pantalla co
 
 ## Hardware
 
-| Componente | Recomendado | Notas |
-| --- | --- | --- |
-| Computadora | Raspberry Pi 5 o 4 (4 GB+) con **Raspberry Pi OS de 64 bits** | MediaPipe necesita 64 bits. |
-| Cámara | USB (UVC, MJPG 1080p) o Camera Module (CSI) | `camera = 0` o `camera = picamera2`. |
-| Servos pan/tilt | 2 servos (SG90, MG90S, MG996R…) en soporte pan/tilt | Mediante un **Arduino Uno por USB (recomendado)**, un PCA9685 o directo a GPIO. |
-| Mano | 1 servo, o un relé/solenoide | `[hand] type = servo` o `gpio`. |
-| Audio | Micrófono USB (o de conferencia) y altavoz | Mejor un altavoz-micrófono con cancelación de eco. |
-| Pantalla | Monitor o proyector HDMI | Opcional (`mode = none`). |
+El Asgard de este proyecto usa estas piezas:
 
-### Conexiones (valores predeterminados)
+| Componente | Pieza | Conexión | Notas |
+| --- | --- | --- | --- |
+| Computadora | Raspberry Pi 4 o 5 (4 GB o más) con **Raspberry Pi OS de 64 bits** | — | MediaPipe necesita 64 bits. Va montada detrás de la pantalla. |
+| Pantalla | Pantalla HDMI de 10.1" | HDMI | Pantalla del aula: muestra al usuario, su pantalla compartida, la mano y el chat. |
+| Cámara | Logitech C920 (MJPG 1080p) | USB | `camera = 0`. Va en el soporte pan/tilt impreso, sujeta por la rosca de tripié de su clip. |
+| Servos pan/tilt | 2 Steren MOT-100 (formato SG90) | Arduino D9 (pan) y D10 (tilt) | Límites y pulsos en `[servos]`. |
+| Mano | 1 Steren MOT-100 con el brazo señalizador | Arduino D3 | `[hand] type = servo`. |
+| Placa de servos | Arduino Uno | USB de la Raspberry | Firmware en [Asgard/Firmware](../Firmware/README.es.md). |
+| Micrófonos | Teensy 4.0 con 4 INMP441 (3 al frente, 1 atrás) | I2S al Teensy; USB a la Raspberry (propuesto) | **En desarrollo**: el firmware del Teensy todavía no está en el repositorio. |
+| Bocinas | Amplificador TPA3116 con 2 bocinas de 52.8 mm | Audio de la Raspberry (cableado por definir) | Reproducen la voz del usuario en el aula. |
+| Fuente de los servos | 5–6 V, al menos 1 A por servo | Tierra común en un solo punto | Ver el cableado abajo. |
 
-| Señal | GPIO (BCM) | Pin físico |
-| --- | --- | --- |
-| Servo pan (horizontal) | GPIO 17 | 11 |
-| Servo tilt (vertical) | GPIO 27 | 13 |
-| Mano (servo o relé) | GPIO 22 | 15 |
-| PCA9685 SDA / SCL | GPIO 2 / GPIO 3 | 3 / 5 |
-| PCA9685 VCC (lógica) | 3,3 V | 1 |
+Mientras el arreglo de micrófonos está en desarrollo, Asgard usa el micrófono predeterminado del sistema (o el de `[audio] input`), así que para probar sirve cualquier micrófono USB.
 
-> **Alimenta los servos con una fuente externa de 5–6 V** y une su GND con el de la Raspberry (o del Arduino). Un servo que se alimenta del pin de 5 V de la Pi puede reiniciarla o dañarla.
+> **Alimenta los servos con su propia fuente de 5–6 V** y une su GND con el del Arduino. Un servo que se alimenta de la Raspberry o del Arduino puede reiniciarlos.
 
-- **Directo a GPIO (`gpiozero`)**: sin `pigpio` el pulso se genera por software y varía cuando la CPU está ocupada con la IA y el video: los servos tiemblan o se mueven solos. Al arrancar, Asgard lo avisa en el registro. Sirve para pruebas; para el aula usa un Arduino Uno o un PCA9685.
-- **Raspberry Pi 5**: no admite `pigpio`. **Raspberry Pi 4 o anterior**: con `--pigpio` el GPIO directo usa PWM por hardware.
-- **PCA9685**: activa I2C con `sudo raspi-config` → *Interface Options* → *I2C*.
+Los servos van en un Arduino porque genera los pulsos con temporizadores por hardware. Si se conectan directo a los GPIO (`gpiozero`), el pulso se genera por software y varía cuando la CPU está ocupada con la IA y el video: los servos tiemblan o se mueven solos. La Raspberry Pi 5 tampoco admite `pigpio`.
 
-### Conexión con Arduino Uno (recomendada)
+### Cableado de los servos
 
 Un Arduino Uno genera los pulsos de los tres servos con los temporizadores por hardware de su ATmega328P y recibe las posiciones de la Raspberry por USB (un puerto serie a 115200 baudios: unos 1,4 ms por posición). Es barato, sus señales son de 5 V como esperan los servos y el cable USB también lo alimenta. El firmware y cómo cargarlo (desde una PC o desde la propia Raspberry) están en [Asgard/Firmware](../Firmware/README.es.md). Configuración: `./install.sh --servos arduino`, o en `asgard.ini` `[servos] driver = arduino` (la mano usa el mismo Arduino, canal 2). También sirven un Arduino Nano o un ESP32 con el mismo firmware (`driver = esp32`).
 
@@ -74,7 +69,7 @@ Un Arduino Uno genera los pulsos de los tres servos con los temporizadores por h
 - **Alimentación del Arduino.** Aliméntalo por el USB de la Raspberry y nunca alimentes los servos desde su pin 5V (el USB da 500 mA como máximo). Si toma energía de la fuente de los servos, cada arranque de motor le baja el voltaje y se reinicia: Asgard registra «La placa de servos se reinició». No conectes el +5 V de la fuente al pin 5V/VIN mientras el USB esté conectado.
 - **Capacitor.** Pon de 470 a 1000 µF (10 V o más) en los bornes de los servos, más uno cerámico de 100 nF. Absorbe los picos de arranque (cada servo de 1,8 kg·cm pide hasta 0,7–1 A al arrancar o bloquearse).
 - **Resistencias de la señal.** La de 330 Ω en serie amortigua el rebote del cable. La de 10 kΩ a GND mantiene la señal en bajo mientras el Arduino arranca (sus pines son entradas hasta que empieza el firmware).
-- **Arranque.** Al abrir el puerto USB el Uno se reinicia: cuando Asgard arranca, los servos quedan sueltos unos 2 segundos. Es normal.
+- **Arranque.** Abrir el puerto USB reinicia el Uno: durante los primeros 2 segundos tras arrancar Asgard, los servos quedan sueltos.
 - **Sin cable USB.** El Arduino también se puede conectar a la UART de la Raspberry (`serial_port = /dev/serial0`, con un divisor en su TX); ver [Asgard/Firmware](../Firmware/README.es.md#directo-a-la-uart-de-la-raspberry-alternativa).
 - **Topes mecánicos.** No dejes un servo empujando contra su tope: consume la corriente máxima y calienta. Ajusta `pan_min`/`pan_max`/`tilt_min`/`tilt_max` y, si hace falta, `min_pulse_us`/`max_pulse_us`.
 
@@ -211,7 +206,7 @@ La simulación usa una cámara virtual con dos personas que caminan y responde a
 | La pantalla dice «No conectado a Bifröst» y el registro «Identificador o secreto de Asgard inválido» | Revisa `device` y `secret`, o genera otro con `bifrost asgard secret <id>`. |
 | «El certificado TLS del servidor no es de confianza» | Copia en `tls_fingerprint` la huella que muestra `bifrost fingerprint`. |
 | Un eje se mueve al revés | `invert_pan = yes` o `invert_tilt = yes` (o desde Midgard, en Seguimiento). |
-| Los servos tiemblan o se mueven solos | Si `--test-servos` dice «PWM por software», usa un Arduino Uno (`driver = arduino`) o un PCA9685. Revisa el cableado y la tierra en [Conexión con Arduino Uno](#conexión-con-arduino-uno-recomendada); `release_when_idle = yes`. |
+| Los servos tiemblan o se mueven solos | Si `--test-servos` dice «PWM por software», comprueba que `[servos] driver = arduino`. Revisa el cableado y la tierra en [Cableado de los servos](#cableado-de-los-servos); `release_when_idle = yes`. |
 | «La placa de servos se reinició…» | La placa se queda sin voltaje cuando arrancan los motores. Aliméntala por el USB de la Raspberry, agrega el capacitor y usa una fuente de al menos 1 A por servo. |
 | «No se encontró ninguna placa de servos (Arduino o ESP32) por USB» o «Permission denied: /dev/ttyACM0» | Usa un cable de datos. Ejecuta `./install.sh --servos arduino` y reinicia (grupo `dialout`). Si hay varios puertos, fija `[servos] serial_port`. |
 | «La placa en … no respondió» o «firmware incompatible» | Carga `Asgard/Firmware/asgard_servos` en el Arduino (ver su README). Asgard 2 usa el protocolo 2 del firmware. |

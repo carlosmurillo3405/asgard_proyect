@@ -70,7 +70,7 @@ Stop Asgard while flashing (`systemctl --user stop asgard`, or close its window)
 
 ## Trying it without the Raspberry Pi
 
-Open the serial monitor (**🔌 Serial Monitor** in VS Code, or `pio device monitor`). It is already set to 115200 baud and sends each line when Enter is pressed. Type:
+Open the serial monitor (**Serial Monitor** in the PlatformIO bottom bar, or `pio device monitor`). It is already set to 115200 baud and sends each line when Enter is pressed. Type:
 
 ```
 ?            → ASGARD-SERVOS proto=2 channels=3 fw=2.1.0 chip=ATmega328P timeout=0
@@ -101,7 +101,7 @@ The USB cable carries the data and the Arduino's power; it is a serial port at 1
 
 The port is detected by itself: `/dev/ttyACM0` on an original Uno, `/dev/ttyUSB0` on clones with a CH340 chip. With several serial devices, set it in `asgard.ini` with `[servos] serial_port = /dev/ttyACM0`. Calibration stays in `asgard.ini`: `min_pulse_us`, `max_pulse_us`, the limits and the speed.
 
-When Asgard opens the port, the Uno restarts and takes about 2 seconds to answer: that is normal, Asgard waits for it, and the servos stay released meanwhile.
+When Asgard opens the port, the Uno restarts and takes about 2 seconds to answer; Asgard waits for that answer, and the servos stay released meanwhile.
 
 ### Straight to the Raspberry Pi's UART (alternative)
 
@@ -118,7 +118,7 @@ Without a USB cable, the Arduino can talk to the GPIO serial port:
 - In `asgard.ini`: `[servos] serial_port = /dev/serial0`.
 - Power the Arduino through its jack or VIN (7–12 V), **not** through USB connected to a computer: its USB chip also drives D0 and would fight the Raspberry Pi. Disconnect D0/D1 to flash it.
 
-The wiring of the servos, the power supply and the ground is in the [Asgard guide](../Software/README.md#arduino-uno-wiring-recommended).
+The wiring of the servos, the power supply and the ground is in the [Asgard guide](../Software/README.md#servo-wiring).
 
 ## Protocol (version 2)
 

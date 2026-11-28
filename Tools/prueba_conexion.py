@@ -19,8 +19,8 @@ pasando por el servidor.
 
 Uso (desde la raíz de asgard_proyect, con el entorno de setup_env):
 
-    .venv\\Scripts\\python prueba_conexion.py --server 89.167.30.182 \\
-        --fingerprint 06:CC:...:37 --device aula-1 --secret <SECRETO> --user carlos
+    .venv\\Scripts\\python Tools\\prueba_conexion.py --server <IP o dominio> \\
+        --fingerprint <huella> --device room-1 --secret <SECRETO> --user <usuario>
 
 La contraseña se pide al empezar (no se muestra ni se guarda).
 """
@@ -40,14 +40,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent   # raíz del repositorio (este archivo está en Tools/)
 
 
 def find_repo(explicit: str | None) -> Path:
     for candidate in ([Path(explicit)] if explicit else []) + [ROOT, Path.cwd()]:
         if (candidate / "Midgard" / "midgard").is_dir() and (candidate / "Asgard" / "Software").is_dir():
             return candidate.resolve()
-    sys.exit("No encuentro el proyecto: guarda este archivo en la raíz de asgard_proyect o usa --repo <carpeta>.")
+    sys.exit("No se encontró el proyecto: el archivo debe estar en Tools/ de asgard_proyect, o indica la carpeta con --repo.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server", required=True, help="IP o dominio de Bifröst")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--fingerprint", default="", help="huella TLS (bifrost fingerprint); vacío = sin TLS")
-    parser.add_argument("--device", default="aula-1", help="identificador del Asgard registrado")
+    parser.add_argument("--device", default="room-1", help="identificador del Asgard registrado")
     parser.add_argument("--secret", required=True, help="secreto del Asgard")
     parser.add_argument("--user", required=True, help="usuario de Midgard")
     parser.add_argument("--password", default=os.environ.get("PRUEBA_PASSWORD", ""),
@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quality", type=int, default=80, help="calidad JPEG del Asgard simulado")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
-    parser.add_argument("--repo", help="carpeta de asgard_proyect (por defecto, la de este archivo)")
+    parser.add_argument("--repo", help="carpeta de asgard_proyect (por defecto, la que contiene Tools/)")
     return parser.parse_args()
 
 
@@ -315,7 +315,7 @@ def main() -> int:
         reached = servo.get("target_pan", state.get("pan"))
         moved = isinstance(reached, (int, float)) and abs(float(reached) - target_pan) < 2
         report.add(moved, "Comando de cámara (ptz_set)",
-                   f"pedí pan {target_pan:.0f}°, el Asgard reporta {reached}")
+                   f"pan pedido {target_pan:.0f}°, reportado por el Asgard {reached}")
         report.add(chat_id in midgard.chat_acks, "Chat con acuse de entrega",
                    "entregado" if chat_id in midgard.chat_acks else "sin acuse")
 

@@ -29,32 +29,27 @@ Shortcuts: **F11** toggles full screen and **Ctrl+Q** closes. In full screen the
 
 ## Hardware
 
-| Component | Recommended | Notes |
-| --- | --- | --- |
-| Computer | Raspberry Pi 5 or 4 (4 GB+) with **64-bit Raspberry Pi OS** | MediaPipe needs 64 bits. |
-| Camera | USB (UVC, MJPG 1080p) or Camera Module (CSI) | `camera = 0` or `camera = picamera2`. |
-| Pan/tilt servos | 2 servos (SG90, MG90S, MG996R…) on a pan/tilt mount | Through an **Arduino Uno over USB (recommended)**, a PCA9685 or straight to GPIO. |
-| Hand | 1 servo, or a relay/solenoid | `[hand] type = servo` or `gpio`. |
-| Audio | USB (or conference) microphone and speaker | Better a speakerphone with echo cancellation. |
-| Screen | HDMI monitor or projector | Optional (`mode = none`). |
+The Asgard in this project uses these parts:
 
-### Wiring (default values)
+| Component | Part | Connection | Notes |
+| --- | --- | --- | --- |
+| Computer | Raspberry Pi 4 or 5 (4 GB or more) with **64-bit Raspberry Pi OS** | — | MediaPipe needs 64 bits. Mounted behind the screen. |
+| Screen | 10.1" HDMI screen | HDMI | Classroom screen: shows the user, their shared screen, the hand and the chat. |
+| Camera | Logitech C920 (MJPG 1080p) | USB | `camera = 0`. Sits on the printed pan/tilt mount, held by the tripod thread of its clip. |
+| Pan/tilt servos | 2 Steren MOT-100 (SG90 size) | Arduino D9 (pan) and D10 (tilt) | Limits and pulses in `[servos]`. |
+| Hand | 1 Steren MOT-100 with the signalling arm | Arduino D3 | `[hand] type = servo`. |
+| Servo board | Arduino Uno | Raspberry Pi USB | Firmware in [Asgard/Firmware](../Firmware/README.md). |
+| Microphones | Teensy 4.0 with 4 INMP441 (3 at the front, 1 at the back) | I2S to the Teensy; USB to the Raspberry Pi (proposed) | **In development**: the Teensy firmware is not in the repository yet. |
+| Speakers | TPA3116 amplifier with 2 × 52.8 mm speakers | Raspberry Pi audio (wiring to be defined) | Play the user's voice in the classroom. |
+| Servo supply | 5–6 V, at least 1 A per servo | Common ground at a single point | See the wiring below. |
 
-| Signal | GPIO (BCM) | Physical pin |
-| --- | --- | --- |
-| Pan servo (horizontal) | GPIO 17 | 11 |
-| Tilt servo (vertical) | GPIO 27 | 13 |
-| Hand (servo or relay) | GPIO 22 | 15 |
-| PCA9685 SDA / SCL | GPIO 2 / GPIO 3 | 3 / 5 |
-| PCA9685 VCC (logic) | 3.3 V | 1 |
+While the microphone array is in development, Asgard uses the system's default microphone (or the one in `[audio] input`), so any USB microphone works for testing.
 
-> **Power the servos from an external 5–6 V supply** and join its GND with the Raspberry Pi's (or the Arduino's). A servo powered from the Pi's 5 V pin can reset or damage it.
+> **Power the servos from their own 5–6 V supply** and join its GND with the Arduino's. A servo powered from the Raspberry Pi or the Arduino can reset them.
 
-- **Straight to GPIO (`gpiozero`)**: without `pigpio` the pulse is generated in software and varies when the CPU is busy with the AI and the video: the servos jitter or move by themselves. At start-up Asgard warns about it in the log. Fine for testing; for the classroom use an Arduino Uno or a PCA9685.
-- **Raspberry Pi 5**: does not support `pigpio`. **Raspberry Pi 4 or older**: with `--pigpio` direct GPIO uses hardware PWM.
-- **PCA9685**: enable I2C with `sudo raspi-config` → *Interface Options* → *I2C*.
+The servos go on an Arduino because it generates the pulses with hardware timers. Wired straight to the GPIO (`gpiozero`), the pulse is generated in software and varies when the CPU is busy with the AI and the video: the servos jitter or move by themselves. The Raspberry Pi 5 does not support `pigpio` either.
 
-### Arduino Uno wiring (recommended)
+### Servo wiring
 
 An Arduino Uno generates the pulses of the three servos with the hardware timers of its ATmega328P and receives the positions from the Raspberry Pi over USB (a 115200-baud serial port: about 1.4 ms per position). It is cheap, its signals are 5 V like the servos expect, and the USB cable also powers it. The firmware and how to flash it (from a PC or from the Raspberry Pi itself) are in [Asgard/Firmware](../Firmware/README.md). Configuration: `./install.sh --servos arduino`, or in `asgard.ini` `[servos] driver = arduino` (the hand uses the same Arduino, channel 2). An Arduino Nano or an ESP32 with the same firmware also work (`driver = esp32`).
 
@@ -74,7 +69,7 @@ An Arduino Uno generates the pulses of the three servos with the hardware timers
 - **Arduino power.** Power it from the Raspberry Pi's USB and never feed the servos from its 5V pin (USB gives 500 mA at most). When it takes power from the servo supply, every motor start drops its voltage and it restarts: Asgard logs «The servo board restarted». Do not connect the supply's +5 V to the 5V/VIN pin while USB is connected.
 - **Capacitor.** Put 470 to 1000 µF (10 V or more) on the servo terminals, plus a 100 nF ceramic one. It absorbs the start-up peaks (each 1.8 kg·cm servo draws up to 0.7–1 A when starting or stalling).
 - **Signal resistors.** The 330 Ω one in series damps the cable's ringing. The 10 kΩ one to GND keeps the signal low while the Arduino boots (its pins are inputs until the firmware starts).
-- **Start-up.** Opening the USB port restarts the Uno: when Asgard starts, the servos stay released for about 2 seconds. That is normal.
+- **Start-up.** Opening the USB port restarts the Uno: for the first 2 seconds after Asgard starts, the servos stay released.
 - **No USB cable.** The Arduino can also be wired to the Raspberry Pi's UART (`serial_port = /dev/serial0`, with a divider on its TX); see [Asgard/Firmware](../Firmware/README.md#straight-to-the-raspberry-pis-uart-alternative).
 - **Mechanical stops.** Do not leave a servo pushing against its stop: it draws maximum current and heats up. Adjust `pan_min`/`pan_max`/`tilt_min`/`tilt_max` and, if needed, `min_pulse_us`/`max_pulse_us`.
 
@@ -211,7 +206,7 @@ The simulation uses a virtual camera with two people walking and responds to the
 | The screen says «Not connected to Bifröst» and the log «Invalid Asgard identifier or secret» | Check `device` and `secret`, or generate a new one with `bifrost asgard secret <id>`. |
 | «The server's TLS certificate is not trusted» | Copy into `tls_fingerprint` the fingerprint `bifrost fingerprint` shows. |
 | An axis moves the wrong way | `invert_pan = yes` or `invert_tilt = yes` (or from Midgard, under Tracking). |
-| The servos jitter or move by themselves | When `--test-servos` says «software PWM», use an Arduino Uno (`driver = arduino`) or a PCA9685. Check the wiring and the ground in [Arduino Uno wiring](#arduino-uno-wiring-recommended); `release_when_idle = yes`. |
+| The servos jitter or move by themselves | When `--test-servos` says «software PWM», check that `[servos] driver = arduino`. Check the wiring and the ground in [Servo wiring](#servo-wiring); `release_when_idle = yes`. |
 | «The servo board restarted…» | The board runs out of voltage when the motors start. Power it from the Raspberry Pi's USB, add the capacitor and use a supply of at least 1 A per servo. |
 | «No servo board (Arduino or ESP32) was found over USB» or «Permission denied: /dev/ttyACM0» | Use a data cable. Run `./install.sh --servos arduino` and reboot (`dialout` group). With several ports, set `[servos] serial_port`. |
 | «The board on … did not answer» or «incompatible firmware» | Flash `Asgard/Firmware/asgard_servos` to the Arduino (see its README). Asgard 2 uses firmware protocol 2. |
