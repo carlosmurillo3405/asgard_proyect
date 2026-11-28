@@ -69,7 +69,7 @@ An Arduino Uno generates the pulses of the three servos with the hardware timers
 - **Arduino power.** Power it from the Raspberry Pi's USB and never feed the servos from its 5V pin (USB gives 500 mA at most). When it takes power from the servo supply, every motor start drops its voltage and it restarts: Asgard logs «The servo board restarted». Do not connect the supply's +5 V to the 5V/VIN pin while USB is connected.
 - **Capacitor.** Put 470 to 1000 µF (10 V or more) on the servo terminals, plus a 100 nF ceramic one. It absorbs the start-up peaks (each 1.8 kg·cm servo draws up to 0.7–1 A when starting or stalling).
 - **Signal resistors.** The 330 Ω one in series damps the cable's ringing. The 10 kΩ one to GND keeps the signal low while the Arduino boots (its pins are inputs until the firmware starts).
-- **Start-up.** Opening the USB port restarts the Uno: when Asgard starts, the servos stay released for about 2 seconds. That is normal.
+- **Start-up.** Opening the USB port restarts the Uno: for the first 2 seconds after Asgard starts, the servos stay released.
 - **No USB cable.** The Arduino can also be wired to the Raspberry Pi's UART (`serial_port = /dev/serial0`, with a divider on its TX); see [Asgard/Firmware](../Firmware/README.md#straight-to-the-raspberry-pis-uart-alternative).
 - **Mechanical stops.** Do not leave a servo pushing against its stop: it draws maximum current and heats up. Adjust `pan_min`/`pan_max`/`tilt_min`/`tilt_max` and, if needed, `min_pulse_us`/`max_pulse_us`.
 

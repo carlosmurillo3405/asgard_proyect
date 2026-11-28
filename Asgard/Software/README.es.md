@@ -69,7 +69,7 @@ Un Arduino Uno genera los pulsos de los tres servos con los temporizadores por h
 - **Alimentación del Arduino.** Aliméntalo por el USB de la Raspberry y nunca alimentes los servos desde su pin 5V (el USB da 500 mA como máximo). Si toma energía de la fuente de los servos, cada arranque de motor le baja el voltaje y se reinicia: Asgard registra «La placa de servos se reinició». No conectes el +5 V de la fuente al pin 5V/VIN mientras el USB esté conectado.
 - **Capacitor.** Pon de 470 a 1000 µF (10 V o más) en los bornes de los servos, más uno cerámico de 100 nF. Absorbe los picos de arranque (cada servo de 1,8 kg·cm pide hasta 0,7–1 A al arrancar o bloquearse).
 - **Resistencias de la señal.** La de 330 Ω en serie amortigua el rebote del cable. La de 10 kΩ a GND mantiene la señal en bajo mientras el Arduino arranca (sus pines son entradas hasta que empieza el firmware).
-- **Arranque.** Al abrir el puerto USB el Uno se reinicia: cuando Asgard arranca, los servos quedan sueltos unos 2 segundos. Es normal.
+- **Arranque.** Abrir el puerto USB reinicia el Uno: durante los primeros 2 segundos tras arrancar Asgard, los servos quedan sueltos.
 - **Sin cable USB.** El Arduino también se puede conectar a la UART de la Raspberry (`serial_port = /dev/serial0`, con un divisor en su TX); ver [Asgard/Firmware](../Firmware/README.es.md#directo-a-la-uart-de-la-raspberry-alternativa).
 - **Topes mecánicos.** No dejes un servo empujando contra su tope: consume la corriente máxima y calienta. Ajusta `pan_min`/`pan_max`/`tilt_min`/`tilt_max` y, si hace falta, `min_pulse_us`/`max_pulse_us`.
 

@@ -130,7 +130,7 @@ En Midgard inicia sesión, entra a «room-1» y haz clic sobre una persona del v
 - La contraseña se pide al empezar y no se guarda. Sin `--fingerprint` la conexión va sin TLS (Bifröst en modo local).
 - Apaga el Asgard real mientras corre la prueba: usa el mismo identificador y chocarían.
 - La prueba no cubre el audio por UDP.
-- Si haces un `.bat` con estos datos, nómbralo `prueba….bat`: `.gitignore` lo excluye, porque lleva el secreto del Asgard.
+- `.gitignore` excluye los archivos `prueba*.bat`; los lanzadores locales con el secreto del Asgard deben usar ese nombre.
 
 ## Estructura del repositorio
 

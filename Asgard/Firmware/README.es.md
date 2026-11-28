@@ -70,7 +70,7 @@ Detén Asgard mientras cargas (`systemctl --user stop asgard`, o cierra su venta
 
 ## Probarlo sin la Raspberry
 
-Abre el monitor serie (**🔌 Serial Monitor** en VS Code, o `pio device monitor`). Ya está configurado a 115200 baudios y envía cada línea al pulsar Enter. Escribe:
+Abre el monitor serie (**Serial Monitor** en la barra inferior de PlatformIO, o `pio device monitor`). Ya está configurado a 115200 baudios y envía cada línea al pulsar Enter. Escribe:
 
 ```
 ?            → ASGARD-SERVOS proto=2 channels=3 fw=2.1.0 chip=ATmega328P timeout=0
@@ -101,7 +101,7 @@ El cable USB lleva los datos y la alimentación del Arduino; es un puerto serie 
 
 El puerto se detecta solo: `/dev/ttyACM0` en un Uno original, `/dev/ttyUSB0` en los clones con chip CH340. Si hay varios dispositivos serie, fíjalo en `asgard.ini` con `[servos] serial_port = /dev/ttyACM0`. La calibración sigue en `asgard.ini`: `min_pulse_us`, `max_pulse_us`, los límites y la velocidad.
 
-Cuando Asgard abre el puerto, el Uno se reinicia y tarda unos 2 segundos en responder: es normal, Asgard lo espera, y mientras tanto los servos quedan sueltos.
+Al abrir el puerto, el Uno se reinicia y tarda unos 2 segundos en responder; Asgard espera esa respuesta y, mientras tanto, los servos quedan sueltos.
 
 ### Directo a la UART de la Raspberry (alternativa)
 

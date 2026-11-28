@@ -47,7 +47,7 @@ def find_repo(explicit: str | None) -> Path:
     for candidate in ([Path(explicit)] if explicit else []) + [ROOT, Path.cwd()]:
         if (candidate / "Midgard" / "midgard").is_dir() and (candidate / "Asgard" / "Software").is_dir():
             return candidate.resolve()
-    sys.exit("No encuentro el proyecto: deja este archivo en Tools/ de asgard_proyect o usa --repo <carpeta>.")
+    sys.exit("No se encontró el proyecto: el archivo debe estar en Tools/ de asgard_proyect, o indica la carpeta con --repo.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -315,7 +315,7 @@ def main() -> int:
         reached = servo.get("target_pan", state.get("pan"))
         moved = isinstance(reached, (int, float)) and abs(float(reached) - target_pan) < 2
         report.add(moved, "Comando de cámara (ptz_set)",
-                   f"pedí pan {target_pan:.0f}°, el Asgard reporta {reached}")
+                   f"pan pedido {target_pan:.0f}°, reportado por el Asgard {reached}")
         report.add(chat_id in midgard.chat_acks, "Chat con acuse de entrega",
                    "entregado" if chat_id in midgard.chat_acks else "sin acuse")
 
