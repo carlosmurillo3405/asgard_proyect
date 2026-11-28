@@ -118,7 +118,7 @@ Without a USB cable, the Arduino can talk to the GPIO serial port:
 - In `asgard.ini`: `[servos] serial_port = /dev/serial0`.
 - Power the Arduino through its jack or VIN (7–12 V), **not** through USB connected to a computer: its USB chip also drives D0 and would fight the Raspberry Pi. Disconnect D0/D1 to flash it.
 
-The wiring of the servos, the power supply and the ground is in the [Asgard guide](../Software/README.md#arduino-uno-wiring-recommended).
+The wiring of the servos, the power supply and the ground is in the [Asgard guide](../Software/README.md#servo-wiring).
 
 ## Protocol (version 2)
 

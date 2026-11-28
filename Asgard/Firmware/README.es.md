@@ -118,7 +118,7 @@ Sin cable USB, el Arduino puede hablar con el puerto serie de los GPIO:
 - En `asgard.ini`: `[servos] serial_port = /dev/serial0`.
 - Alimenta el Arduino por su conector o por VIN (7–12 V), **no** por USB conectado a una computadora: su chip USB también maneja D0 y chocaría con la Raspberry. Desconecta D0/D1 para cargarle el firmware.
 
-El cableado de los servos, la fuente y la tierra está en la [guía de Asgard](../Software/README.es.md#conexión-con-arduino-uno-recomendada).
+El cableado de los servos, la fuente y la tierra está en la [guía de Asgard](../Software/README.es.md#cableado-de-los-servos).
 
 ## Protocolo (versión 2)
 
