@@ -36,4 +36,4 @@ __pycache__/
 /Demo/data/
 
 # Lanzadores locales de pruebas: llevan secretos de Asgard (no se versionan)
-/prueba*.bat
+prueba*.bat

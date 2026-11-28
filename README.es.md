@@ -119,6 +119,19 @@ Con el entorno de la raíz (en Linux/macOS usa `.venv/bin/python` en lugar de `.
 
 En Midgard inicia sesión, entra a «room-1» y haz clic sobre una persona del video simulado: la cámara virtual la sigue. Con la vista avanzada verás el esqueleto, las trayectorias y los servos.
 
+### Probar la conexión con un servidor real
+
+`Tools/prueba_conexion.py` comprueba un Bifröst real (por ejemplo, uno en Internet) sin la Raspberry: lanza en esta PC un Asgard simulado y un Midgard sin ventana, los conecta al servidor y revisa, paso a paso, la conexión TLS y su huella, el inicio de sesión, que el Asgard aparezca disponible, la llamada, el video (cuadros por segundo y retraso de punta a punta), un comando de cámara y el chat. Como los dos clientes corren en la misma PC, el retraso se mide con el mismo reloj.
+
+```bash
+.venv\Scripts\python Tools\prueba_conexion.py --server <IP o dominio> --fingerprint <huella> --device room-1 --secret <SECRETO> --user <usuario>
+```
+
+- La contraseña se pide al empezar y no se guarda. Sin `--fingerprint` la conexión va sin TLS (Bifröst en modo local).
+- Apaga el Asgard real mientras corre la prueba: usa el mismo identificador y chocarían.
+- La prueba no cubre el audio por UDP.
+- Si haces un `.bat` con estos datos, nómbralo `prueba….bat`: `.gitignore` lo excluye, porque lleva el secreto del Asgard.
+
 ## Estructura del repositorio
 
 ```
@@ -127,14 +140,15 @@ asgard_proyect/
 ├─ Asgard/                      equipo del aula
 │  ├─ Software/                 programa de la Raspberry Pi: main.py, asgard/, install.sh, asgard.example.ini
 │  ├─ Firmware/                 Arduino Uno que controla los servos (proyecto PlatformIO)
-│  └─ Hardware/                 modelos 3D de la carcasa
+│  └─ Hardware/                 carcasa v1 (medidas y piezas; los archivos de impresión se agregarán)
 ├─ Bifrost/                     servidor: main.py, bifrost/, install.sh
 ├─ Midgard/                     PC del usuario: main.py, midgard/, instaladores (Windows, Linux/macOS)
 │  ├─ web/                      Midgard Web (navegador), la sirve Bifröst
 │  └─ mobile/                   apps de Android e iOS (Capacitor)
 ├─ Common/                      código compartido (fuente única): protocolo, red, audio, imagen, idiomas
 │                               y kit visual, más sync.py, setup_env.py y la referencia del protocolo
-└─ Demo/                        demostración de las ventanas sin red ni hardware
+├─ Demo/                        demostración de las ventanas sin red ni hardware
+└─ Tools/                       prueba de conexión contra un Bifröst real
 ```
 
 Cada programa se instala por separado con su propio instalador y archivo `requirements.txt`.
