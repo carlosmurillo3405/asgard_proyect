@@ -163,3 +163,10 @@ python Common/sync.py --check   # verifica que las copias estén al día
 ```
 
 Los textos de las interfaces se escriben en inglés dentro de `tr("…")`; su traducción al español está en los catálogos `locale/*.es.json` de cada paquete (ver [Common/README.es.md](Common/README.es.md#idiomas)). Los comentarios del código están en español.
+
+## Equipo
+
+- Carlos Saúl Murillo León
+- Nicolás
+- Enrique Karín Ramírez Galindo
+- Joseph Eduardo Ortega Trejo

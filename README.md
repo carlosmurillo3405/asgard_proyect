@@ -163,3 +163,10 @@ python Common/sync.py --check   # checks that the copies are up to date
 ```
 
 Interface texts are written in English inside `tr("…")`; their Spanish translation lives in each package's `locale/*.es.json` catalogs (see [Common/README.md](Common/README.md#languages)). Code comments are in Spanish.
+
+## Team
+
+- Carlos Saúl Murillo León
+- Nicolás
+- Enrique Karín Ramírez Galindo
+- Joseph Eduardo Ortega Trejo
