@@ -164,6 +164,10 @@ python Common/sync.py --check   # verifica que las copias estén al día
 
 Los textos de las interfaces se escriben en inglés dentro de `tr("…")`; su traducción al español está en los catálogos `locale/*.es.json` de cada paquete (ver [Common/README.es.md](Common/README.es.md#idiomas)). Los comentarios del código están en español.
 
+## Herramientas de desarrollo
+
+La herramienta principal de programación del proyecto fue la ingeniería de prompts con programación asistida por IA, usando Claude (Anthropic), principalmente a través de Claude Code. Los commits hechos en sesiones de Claude llevan la línea `Co-Authored-By: Claude`.
+
 ## Equipo
 
 - Carlos Saúl Murillo León

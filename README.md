@@ -164,6 +164,10 @@ python Common/sync.py --check   # checks that the copies are up to date
 
 Interface texts are written in English inside `tr("…")`; their Spanish translation lives in each package's `locale/*.es.json` catalogs (see [Common/README.md](Common/README.md#languages)). Code comments are in Spanish.
 
+## Development tools
+
+The project's main programming tool was prompt engineering with AI-assisted programming, using Claude (Anthropic), mainly through Claude Code. Commits made in Claude sessions carry the `Co-Authored-By: Claude` line.
+
 ## Team
 
 - Carlos Saúl Murillo León
