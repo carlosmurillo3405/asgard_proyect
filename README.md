@@ -148,7 +148,8 @@ asgard_proyect/
 ├─ Common/                      shared code (single source): protocol, network, audio, imaging, languages
 │                               and visual kit, plus sync.py, setup_env.py and the protocol reference
 ├─ Demo/                        demo of the windows without network or hardware
-└─ Tools/                       connection test against a real Bifröst
+├─ Tools/                       connection test against a real Bifröst
+└─ docs/                        technical report (PDF) and circuit schematic
 ```
 
 Each program is installed separately with its own installer and `requirements.txt` file.
@@ -163,6 +164,11 @@ python Common/sync.py --check   # checks that the copies are up to date
 ```
 
 Interface texts are written in English inside `tr("…")`; their Spanish translation lives in each package's `locale/*.es.json` catalogs (see [Common/README.md](Common/README.md#languages)). Code comments are in Spanish.
+
+## Project documentation
+
+- [Technical report](docs/Reporte_final_Proyecto_Asgard.pdf) (Spanish): objectives, electronic design, bill of materials with costs, results and limitations.
+- [Schematic](docs/Esquematico_Asgard.pdf): servo control, audio, power and interconnection. Its sources are in [docs/esquematico](docs/esquematico/README.md).
 
 ## Development tools
 
